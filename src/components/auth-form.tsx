@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useDemoAuth, type DemoRole } from "@/lib/demo-auth";
+import { hasSupabaseEnv } from "@/lib/supabase-browser";
 
 const adminCode = "BOLIHON-ADMIN";
 
@@ -13,34 +14,55 @@ export function AuthForm() {
   const [role, setRole] = useState<DemoRole>(defaultRole);
   const [name, setName] = useState(role === "admin" ? "BOLIHON Admin" : "");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
-  const { login } = useDemoAuth();
+  const [submitting, setSubmitting] = useState(false);
+  const { login, loginWithPassword } = useDemoAuth();
+  const supabaseConfigured = hasSupabaseEnv();
 
   const destination = useMemo(() => (role === "admin" ? "/admin" : "/rooms"), [role]);
 
-  function submit(event: React.FormEvent<HTMLFormElement>) {
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
+    setSubmitting(true);
 
-    if (role === "admin" && code !== adminCode) {
-      setMessage("Enter the correct admin access code. Demo code: BOLIHON-ADMIN");
-      return;
+    try {
+      if (role === "admin" && supabaseConfigured) {
+        if (!email.trim() || !password) {
+          setMessage("Enter the Supabase admin email and password.");
+          return;
+        }
+
+        await loginWithPassword(email.trim(), password);
+        router.push(destination);
+        return;
+      }
+
+      if (role === "admin" && code !== adminCode) {
+        setMessage("Enter the correct admin access code. Demo code: BOLIHON-ADMIN");
+        return;
+      }
+
+      if (role === "guest" && !phone.trim()) {
+        setMessage("Cellphone number is required for guest booking follow-up.");
+        return;
+      }
+
+      login({
+        role,
+        name: name.trim() || (role === "admin" ? "BOLIHON Admin" : "Guest"),
+        email: email.trim(),
+        phone: phone.trim(),
+      });
+      router.push(destination);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to sign in.");
+    } finally {
+      setSubmitting(false);
     }
-
-    if (role === "guest" && !phone.trim()) {
-      setMessage("Cellphone number is required for guest booking follow-up.");
-      return;
-    }
-
-    login({
-      role,
-      name: name.trim() || (role === "admin" ? "BOLIHON Admin" : "Guest"),
-      email: email.trim(),
-      phone: phone.trim(),
-    });
-    router.push(destination);
   }
 
   return (
@@ -72,15 +94,23 @@ export function AuthForm() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Name" value={name} onChange={setName} />
-        <Field label="Email" type="email" value={email} onChange={setEmail} required={false} />
-        <Field label="Cellphone no." type="tel" value={phone} onChange={setPhone} required={role === "guest"} />
-        {role === "admin" ? (
+        <Field label="Email" type="email" value={email} onChange={setEmail} required={role === "admin" && supabaseConfigured} />
+        {role === "admin" && supabaseConfigured ? (
+          <Field label="Password" type="password" value={password} onChange={setPassword} />
+        ) : null}
+        {role === "guest" ? (
+          <Field label="Cellphone no." type="tel" value={phone} onChange={setPhone} required />
+        ) : null}
+        {role === "admin" && !supabaseConfigured ? (
           <Field label="Admin code" type="password" value={code} onChange={setCode} />
         ) : null}
       </div>
 
-      <button className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark">
-        Continue as {role}
+      <button
+        disabled={submitting}
+        className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+      >
+        {submitting ? "Signing in..." : `Continue as ${role}`}
       </button>
       {message ? <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">{message}</p> : null}
     </form>

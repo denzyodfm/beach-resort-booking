@@ -3,7 +3,33 @@
 import { useEffect, useState } from "react";
 import { canGuestCancel, cancellationWindowDays } from "@/lib/booking-logic";
 import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
+import { hasSupabaseEnv } from "@/lib/supabase-browser";
 import type { Booking } from "@/lib/types";
+
+function normalizeBooking(row: Booking | Record<string, unknown>): Booking {
+  const source = row as Record<string, unknown>;
+  const room = source.rooms as { name?: string } | undefined;
+
+  return {
+    id: String(source.id || source.booking_number || ""),
+    roomId: String(source.roomId || source.room_id || ""),
+    roomName: String(source.roomName || room?.name || "Cottage"),
+    guestName: String(source.guestName || source.guest_name || ""),
+    guestEmail: String(source.guestEmail || source.guest_email || ""),
+    guestPhone: String(source.guestPhone || source.guest_phone || ""),
+    checkIn: String(source.checkIn || source.check_in || ""),
+    checkOut: String(source.checkOut || source.check_out || ""),
+    guests: Number(source.guests || source.guest_count || 1),
+    totalPrice: Number(source.totalPrice ?? source.total_amount ?? 0),
+    status: (source.status || "pending") as Booking["status"],
+    paymentStatus: (source.paymentStatus || source.payment_status || "unpaid") as Booking["paymentStatus"],
+    createdAt: String(source.createdAt || source.created_at || new Date().toISOString()).slice(0, 10),
+  };
+}
+
+function formatPeso(value: number | undefined) {
+  return `Php${(Number.isFinite(value) ? value || 0 : 0).toLocaleString()}`;
+}
 
 export function GuestDashboard() {
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -11,7 +37,24 @@ export function GuestDashboard() {
   const [openBookingId, setOpenBookingId] = useState("");
 
   useEffect(() => {
-    const syncBookings = () => setBookings(getDemoBookings());
+    const supabaseConfigured = hasSupabaseEnv();
+
+    const syncBookings = () => {
+      if (!supabaseConfigured) {
+        setBookings(getDemoBookings().map(normalizeBooking));
+        return;
+      }
+
+      fetch("/api/bookings")
+        .then((response) => (response.ok ? response.json() : Promise.reject()))
+        .then((rows: Array<Booking | Record<string, unknown>>) => {
+          setBookings(rows.map(normalizeBooking));
+        })
+        .catch(() => {
+          setBookings([]);
+        });
+    };
+
     syncBookings();
     window.addEventListener("bolihon-bookings-updated", syncBookings);
 
@@ -33,7 +76,7 @@ export function GuestDashboard() {
 
     setMessage(result.message);
     if (response.ok) {
-      updateDemoBooking(booking.id, { status: "cancelled" });
+      if (!hasSupabaseEnv()) updateDemoBooking(booking.id, { status: "cancelled" });
       setBookings((current) =>
         current.map((item) => (item.id === booking.id ? { ...item, status: "cancelled" } : item)),
       );
@@ -55,7 +98,7 @@ export function GuestDashboard() {
       <div className="grid gap-4">
         {bookings.map((booking) => {
           const cancellation = canGuestCancel(booking.checkIn);
-          const bookingWasMadeInsideFreeWindow = booking.createdAt <= cancellation.cancelBy;
+          const bookingWasMadeInsideFreeWindow = Boolean(cancellation.cancelBy) && booking.createdAt <= cancellation.cancelBy;
           const canCancel =
             cancellation.allowed &&
             bookingWasMadeInsideFreeWindow &&
@@ -63,6 +106,8 @@ export function GuestDashboard() {
           const detailsOpen = openBookingId === booking.id;
           const cancellationText = bookingWasMadeInsideFreeWindow
             ? `Cancel by ${cancellation.cancelBy} for free cancellation.`
+            : !cancellation.cancelBy
+              ? "Cancellation is unavailable because this booking has incomplete dates."
             : `Free cancellation was already closed when this booking was made on ${booking.createdAt}.`;
 
           return (
@@ -98,7 +143,7 @@ export function GuestDashboard() {
                 </div>
                 <div className="grid gap-3 text-left lg:text-right">
                   <div>
-                    <p className="text-2xl font-bold text-slate-950">Php{booking.totalPrice.toLocaleString()}</p>
+                    <p className="text-2xl font-bold text-slate-950">{formatPeso(booking.totalPrice)}</p>
                     <p className="mt-1 text-sm capitalize text-slate-600">
                       {booking.status} - {booking.paymentStatus.replace("_", " ")}
                     </p>
@@ -141,7 +186,7 @@ export function GuestDashboard() {
                     <DetailItem label="Check-in" value={booking.checkIn} />
                     <DetailItem label="Check-out" value={booking.checkOut} />
                     <DetailItem label="Guests" value={booking.guests.toString()} />
-                    <DetailItem label="Total" value={`Php${booking.totalPrice.toLocaleString()}`} />
+                    <DetailItem label="Total" value={formatPeso(booking.totalPrice)} />
                     <DetailItem label="Booking status" value={booking.status} />
                     <DetailItem label="Payment status" value={booking.paymentStatus.replace("_", " ")} />
                     <DetailItem label="Booked on" value={booking.createdAt} />

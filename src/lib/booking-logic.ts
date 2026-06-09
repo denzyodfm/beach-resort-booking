@@ -60,6 +60,13 @@ export function isPaidEnoughToConfirm(paymentStatus: PaymentStatus) {
 
 export function canGuestCancel(checkIn: string, now = new Date()) {
   const checkInDate = new Date(`${checkIn}T00:00:00`);
+  if (Number.isNaN(checkInDate.getTime())) {
+    return {
+      allowed: false,
+      cancelBy: "",
+    };
+  }
+
   const cancelBy = new Date(checkInDate);
   cancelBy.setDate(cancelBy.getDate() - cancellationWindowDays);
 

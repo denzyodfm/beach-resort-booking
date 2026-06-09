@@ -1,13 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { isPaidEnoughToConfirm } from "@/lib/booking-logic";
 import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
 import { nightsBetween, rooms, sampleBookings } from "@/lib/resort-data";
+import { hasSupabaseEnv } from "@/lib/supabase-browser";
 import type { Booking, BookingStatus, PaymentStatus, Room } from "@/lib/types";
 
 type BookingAction = "approve" | "cancel";
 type PaymentAction = "verify" | "refund";
+type PaymentDetails = {
+  note: string;
+  amountPaid: number;
+  proofUrl: string;
+  proofName: string;
+};
+type RefundDetails = {
+  amount: number;
+  reason: string;
+};
 
 const defaultAmenityOptions = [
   "Air conditioning",
@@ -46,9 +57,49 @@ function toIsoDate(year: number, monthIndex: number, day: number) {
   return `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+function formatPeso(value: number | undefined) {
+  return `Php${(Number.isFinite(value) ? value || 0 : 0).toLocaleString()}`;
+}
+
+function parsePaymentDetails(source: Record<string, unknown>) {
+  const specialRequests = source.specialRequests || source.special_requests;
+  if (!specialRequests || typeof specialRequests !== "string") {
+    return {
+      paymentNote: String(source.paymentNote || ""),
+      paymentAmountPaid: Number(source.paymentAmountPaid || 0),
+      paymentProofUrl: String(source.paymentProofUrl || ""),
+      paymentProofName: String(source.paymentProofName || ""),
+      refundAmount: Number(source.refundAmount || 0),
+      refundReason: String(source.refundReason || ""),
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(specialRequests) as Record<string, unknown>;
+    return {
+      paymentNote: String(parsed.paymentNote || source.paymentNote || ""),
+      paymentAmountPaid: Number(parsed.paymentAmountPaid || source.paymentAmountPaid || 0),
+      paymentProofUrl: String(parsed.paymentProofUrl || source.paymentProofUrl || ""),
+      paymentProofName: String(parsed.paymentProofName || source.paymentProofName || ""),
+      refundAmount: Number(parsed.refundAmount || source.refundAmount || 0),
+      refundReason: String(parsed.refundReason || source.refundReason || ""),
+    };
+  } catch {
+    return {
+      paymentNote: String(source.paymentNote || ""),
+      paymentAmountPaid: Number(source.paymentAmountPaid || 0),
+      paymentProofUrl: String(source.paymentProofUrl || ""),
+      paymentProofName: String(source.paymentProofName || ""),
+      refundAmount: Number(source.refundAmount || 0),
+      refundReason: String(source.refundReason || ""),
+    };
+  }
+}
+
 function normalizeBooking(row: Booking | Record<string, unknown>): Booking {
   const source = row as Record<string, unknown>;
   const room = source.rooms as { name?: string } | undefined;
+  const paymentDetails = parsePaymentDetails(source);
 
   return {
     id: String(source.id || source.booking_number || ""),
@@ -60,9 +111,15 @@ function normalizeBooking(row: Booking | Record<string, unknown>): Booking {
     checkIn: String(source.checkIn || source.check_in || ""),
     checkOut: String(source.checkOut || source.check_out || ""),
     guests: Number(source.guests || source.guest_count || 1),
-    totalPrice: Number(source.totalPrice || source.total_amount || 0),
+    totalPrice: Number(source.totalPrice ?? source.total_amount ?? 0),
     status: (source.status || "pending") as BookingStatus,
     paymentStatus: (source.paymentStatus || source.payment_status || "unpaid") as PaymentStatus,
+    paymentNote: paymentDetails.paymentNote,
+    paymentAmountPaid: paymentDetails.paymentAmountPaid,
+    paymentProofUrl: paymentDetails.paymentProofUrl,
+    paymentProofName: paymentDetails.paymentProofName,
+    refundAmount: paymentDetails.refundAmount,
+    refundReason: paymentDetails.refundReason,
     createdAt: String(source.createdAt || source.created_at || new Date().toISOString()).slice(0, 10),
   };
 }
@@ -72,19 +129,28 @@ export function AdminDashboard() {
   const [cottages, setCottages] = useState(rooms);
 
   useEffect(() => {
+    const supabaseConfigured = hasSupabaseEnv();
+
     const syncBookings = () => {
-      setBookings(getDemoBookings());
+      if (!supabaseConfigured) {
+        setBookings(getDemoBookings().map(normalizeBooking));
+      }
 
       fetch("/api/admin/bookings")
         .then((response) => (response.ok ? response.json() : Promise.reject()))
         .then((rows: Array<Booking | Record<string, unknown>>) => {
           const apiBookings = rows.map(normalizeBooking);
-          const localBookings = getDemoBookings();
+          if (supabaseConfigured) {
+            setBookings(apiBookings);
+            return;
+          }
+
+          const localBookings = getDemoBookings().map(normalizeBooking);
           const apiIds = new Set(apiBookings.map((booking) => booking.id));
           setBookings([...apiBookings, ...localBookings.filter((booking) => !apiIds.has(booking.id))]);
         })
         .catch(() => {
-          setBookings(getDemoBookings());
+          setBookings(getDemoBookings().map(normalizeBooking));
         });
     };
 
@@ -100,7 +166,7 @@ export function AdminDashboard() {
     const pendingBookings = activeBookings.filter((booking) => booking.status === "pending");
     const totalRevenue = activeBookings
       .filter((booking) => booking.paymentStatus === "paid" || booking.paymentStatus === "deposit_paid")
-      .reduce((sum, booking) => sum + booking.totalPrice, 0);
+      .reduce((sum, booking) => sum + (Number.isFinite(booking.totalPrice) ? booking.totalPrice : 0), 0);
 
     return {
       total: activeBookings.length,
@@ -121,7 +187,7 @@ export function AdminDashboard() {
         if (action === "approve" && !isPaidEnoughToConfirm(booking.paymentStatus)) return booking;
 
         const status = action === "approve" ? "confirmed" : "cancelled";
-        updateDemoBooking(id, { status });
+        if (!hasSupabaseEnv()) updateDemoBooking(id, { status });
         fetch("/api/admin/bookings", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -132,19 +198,44 @@ export function AdminDashboard() {
     );
   }
 
-  function updatePayment(id: string, action: PaymentAction) {
+  function updatePayment(id: string, action: PaymentAction, details?: PaymentDetails | RefundDetails) {
     setBookings((current) =>
       current.map((booking) =>
         booking.id === id
           ? (() => {
-              const paymentStatus = action === "verify" ? "paid" : "refunded";
-              updateDemoBooking(id, { paymentStatus });
+              const paymentDetails = details && "amountPaid" in details ? details : undefined;
+              const refundDetails = details && "amount" in details ? details : undefined;
+              const paymentStatus: PaymentStatus =
+                action === "verify"
+                  ? (paymentDetails?.amountPaid || 0) >= booking.totalPrice
+                    ? "paid"
+                    : "deposit_paid"
+                  : "refunded";
+              const updates: Partial<Booking> = {
+                paymentStatus,
+                paymentNote: action === "verify" ? paymentDetails?.note || "" : booking.paymentNote,
+                paymentAmountPaid: action === "verify" ? paymentDetails?.amountPaid || 0 : booking.paymentAmountPaid,
+                paymentProofUrl: action === "verify" ? paymentDetails?.proofUrl || "" : booking.paymentProofUrl,
+                paymentProofName: action === "verify" ? paymentDetails?.proofName || "" : booking.paymentProofName,
+                refundAmount: action === "refund" ? refundDetails?.amount || 0 : booking.refundAmount,
+                refundReason: action === "refund" ? refundDetails?.reason || "" : booking.refundReason,
+              };
+              if (!hasSupabaseEnv()) updateDemoBooking(id, updates);
               fetch("/api/admin/bookings", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id, paymentStatus }),
+                body: JSON.stringify({
+                  id,
+                  paymentStatus,
+                  paymentNote: updates.paymentNote,
+                  paymentAmountPaid: updates.paymentAmountPaid,
+                  paymentProofUrl: updates.paymentProofUrl,
+                  paymentProofName: updates.paymentProofName,
+                  refundAmount: updates.refundAmount,
+                  refundReason: updates.refundReason,
+                }),
               }).catch(() => undefined);
-              return { ...booking, paymentStatus };
+              return { ...booking, ...updates };
             })()
           : booking,
       ),
@@ -159,7 +250,7 @@ export function AdminDashboard() {
         <StatCard label="Total bookings" value={stats.total.toString()} detail="All active requests" tone="cyan" />
         <StatCard label="Pending bookings" value={stats.pending.toString()} detail="Need approval" tone="amber" />
         <StatCard label="Confirmed bookings" value={stats.confirmed.toString()} detail="Arrivals scheduled" tone="emerald" />
-        <StatCard label="Total revenue" value={`Php${stats.revenue.toLocaleString()}`} detail="Paid and deposits" tone="coral" />
+        <StatCard label="Total revenue" value={formatPeso(stats.revenue)} detail="Paid and deposits" tone="coral" />
       </section>
 
       <section className="grid gap-6">
@@ -202,7 +293,7 @@ function HeroSummary({
         <div className="grid content-end gap-3 rounded-lg bg-white/10 p-5">
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-300">Revenue tracked</span>
-            <span className="text-2xl font-bold">Php{totalRevenue.toLocaleString()}</span>
+            <span className="text-2xl font-bold">{formatPeso(totalRevenue)}</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-white/10">
             <div className="h-full w-3/4 rounded-full bg-coral" />
@@ -454,9 +545,11 @@ function RecentPayments({
   onAction,
 }: {
   bookings: Booking[];
-  onAction: (id: string, action: PaymentAction) => void;
+  onAction: (id: string, action: PaymentAction, details?: PaymentDetails | RefundDetails) => void;
 }) {
   const recent = bookings.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
+  const [verifyingBooking, setVerifyingBooking] = useState<Booking | null>(null);
+  const [refundingBooking, setRefundingBooking] = useState<Booking | null>(null);
 
   return (
     <Panel title="Recent payments" eyebrow="Finance">
@@ -465,21 +558,48 @@ function RecentPayments({
           <article key={booking.id} className="grid gap-3 rounded-lg border border-slate-200 p-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
               <BookingIdentity booking={booking} />
-              <p className="mt-2 text-sm font-semibold text-slate-950">Php{booking.totalPrice.toLocaleString()}</p>
+              <p className="mt-2 text-sm font-semibold text-slate-950">{formatPeso(booking.totalPrice)}</p>
+              {booking.paymentAmountPaid ? (
+                <p className="mt-1 text-xs font-bold text-slate-600">
+                  {booking.paymentAmountPaid >= booking.totalPrice ? "Full payment" : "Partial payment"}:{" "}
+                  {formatPeso(booking.paymentAmountPaid)}
+                </p>
+              ) : null}
+              {booking.refundAmount ? (
+                <div className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  <p className="font-bold">Refunded: {formatPeso(booking.refundAmount)}</p>
+                  {booking.refundReason ? <p className="mt-1">{booking.refundReason}</p> : null}
+                </div>
+              ) : null}
+              {booking.paymentNote || booking.paymentProofUrl ? (
+                <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  {booking.paymentNote ? <p>{booking.paymentNote}</p> : null}
+                  {booking.paymentProofUrl ? (
+                    <a
+                      href={booking.paymentProofUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 inline-flex font-semibold text-cyan-700 hover:text-cyan-900"
+                    >
+                      View proof{booking.paymentProofName ? `: ${booking.paymentProofName}` : ""}
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <StatusPill status={booking.paymentStatus} />
               {booking.paymentStatus !== "paid" && booking.paymentStatus !== "refunded" ? (
                 <button
-                  onClick={() => onAction(booking.id, "verify")}
+                  onClick={() => setVerifyingBooking(booking)}
                   className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
                 >
                   Verify
                 </button>
               ) : null}
-              {booking.paymentStatus === "paid" ? (
+              {booking.paymentStatus === "paid" || booking.paymentStatus === "deposit_paid" ? (
                 <button
-                  onClick={() => onAction(booking.id, "refund")}
+                  onClick={() => setRefundingBooking(booking)}
                   className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                   Refund
@@ -489,7 +609,384 @@ function RecentPayments({
           </article>
         ))}
       </div>
+      {verifyingBooking ? (
+        <PaymentVerificationDialog
+          booking={verifyingBooking}
+          onClose={() => setVerifyingBooking(null)}
+          onSubmit={(details) => {
+            onAction(verifyingBooking.id, "verify", details);
+            setVerifyingBooking(null);
+          }}
+        />
+      ) : null}
+      {refundingBooking ? (
+        <RefundDialog
+          booking={refundingBooking}
+          onClose={() => setRefundingBooking(null)}
+          onSubmit={(details) => {
+            onAction(refundingBooking.id, "refund", details);
+            setRefundingBooking(null);
+          }}
+        />
+      ) : null}
     </Panel>
+  );
+}
+
+function RefundDialog({
+  booking,
+  onClose,
+  onSubmit,
+}: {
+  booking: Booking;
+  onClose: () => void;
+  onSubmit: (details: RefundDetails) => void;
+}) {
+  const [amount, setAmount] = useState(String(booking.refundAmount || booking.paymentAmountPaid || booking.totalPrice));
+  const [reason, setReason] = useState(booking.refundReason || "");
+  const [error, setError] = useState("");
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsedAmount = Number(amount);
+
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setError("Enter the amount refunded.");
+      return;
+    }
+
+    if (!reason.trim()) {
+      setError("Enter the reason for the refund.");
+      return;
+    }
+
+    onSubmit({
+      amount: parsedAmount,
+      reason: reason.trim(),
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 px-4 py-6">
+      <form onSubmit={submit} className="w-full max-w-lg rounded-lg bg-white p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-rose-700">Refund payment</p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">{booking.roomName}</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              {booking.guestName} - paid {formatPeso(booking.paymentAmountPaid || booking.totalPrice)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            Close
+          </button>
+        </div>
+
+        <label htmlFor="refund-amount" className="mt-5 block text-sm font-semibold text-slate-700">
+          Amount refunded
+        </label>
+        <input
+          id="refund-amount"
+          type="number"
+          min="0"
+          step="0.01"
+          value={amount}
+          onChange={(event) => setAmount(event.target.value)}
+          className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none ring-rose-600 focus:ring-2"
+        />
+
+        <label htmlFor="refund-reason" className="mt-4 block text-sm font-semibold text-slate-700">
+          Reason for refund
+        </label>
+        <textarea
+          id="refund-reason"
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="Example: Guest requested cancellation, duplicate payment, date change"
+          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none ring-rose-600 focus:ring-2"
+        />
+
+        {error ? <p className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
+
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+          >
+            Save refund
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function PaymentVerificationDialog({
+  booking,
+  onClose,
+  onSubmit,
+}: {
+  booking: Booking;
+  onClose: () => void;
+  onSubmit: (details: PaymentDetails) => void;
+}) {
+  const [note, setNote] = useState(booking.paymentNote || "");
+  const [amountPaid, setAmountPaid] = useState(
+    String(booking.paymentAmountPaid || booking.totalPrice || ""),
+  );
+  const [proofUrl, setProofUrl] = useState(booking.paymentProofUrl || "");
+  const [proofName, setProofName] = useState(booking.paymentProofName || "");
+  const [error, setError] = useState("");
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    return () => stopCamera();
+  }, []);
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setCameraActive(false);
+    setCameraLoading(false);
+  }
+
+  async function startCamera() {
+    setError("");
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Camera capture is not available in this browser.");
+      return;
+    }
+
+    setCameraLoading(true);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false,
+      });
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+
+      setCameraActive(true);
+    } catch {
+      setError("Camera permission was blocked or unavailable.");
+      stopCamera();
+    } finally {
+      setCameraLoading(false);
+    }
+  }
+
+  function capturePhoto() {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setError("Camera is not ready yet.");
+      return;
+    }
+
+    const maxWidth = 900;
+    const scale = Math.min(1, maxWidth / video.videoWidth);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setError("Could not capture the camera image.");
+      return;
+    }
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const captured = canvas.toDataURL("image/jpeg", 0.8);
+
+    if (captured.length > 1_000_000) {
+      setError("Captured image is too large. Move closer and try again.");
+      return;
+    }
+
+    setProofUrl(captured);
+    setProofName(`camera-proof-${new Date().toISOString().slice(0, 10)}.jpg`);
+    setError("");
+    stopCamera();
+  }
+
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    setError("");
+    if (!file) {
+      setProofUrl("");
+      setProofName("");
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setError("Upload an image file for the payment proof.");
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > 750_000) {
+      setError("Use an image under 750 KB for now.");
+      event.target.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setProofUrl(typeof reader.result === "string" ? reader.result : "");
+      setProofName(file.name);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsedAmount = Number(amountPaid);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setError("Enter the amount paid before marking this payment.");
+      return;
+    }
+
+    onSubmit({
+      note: note.trim(),
+      amountPaid: parsedAmount,
+      proofUrl,
+      proofName,
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 px-4 py-6">
+      <form onSubmit={submit} className="w-full max-w-lg rounded-lg bg-white p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">Payment verification</p>
+            <h3 className="mt-1 text-xl font-bold text-slate-950">{booking.roomName}</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              {booking.guestName} - {formatPeso(booking.totalPrice)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            Close
+          </button>
+        </div>
+
+        <label htmlFor="payment-note" className="mt-5 block text-sm font-semibold text-slate-700">
+          Payment details
+        </label>
+        <textarea
+          id="payment-note"
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Example: GCash ref 123456, paid Php700 on June 9"
+          className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none ring-cyan-600 focus:ring-2"
+        />
+
+        <label htmlFor="payment-amount" className="mt-4 block text-sm font-semibold text-slate-700">
+          Amount paid
+        </label>
+        <input
+          id="payment-amount"
+          type="number"
+          min="0"
+          step="0.01"
+          value={amountPaid}
+          onChange={(event) => setAmountPaid(event.target.value)}
+          className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none ring-cyan-600 focus:ring-2"
+        />
+        {Number(amountPaid) > 0 ? (
+          <p className="mt-2 rounded-md bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-800">
+            {Number(amountPaid) >= booking.totalPrice ? "Full payment" : "Partial payment"}
+          </p>
+        ) : null}
+
+        <label htmlFor="payment-proof" className="mt-4 block text-sm font-semibold text-slate-700">
+          Proof of payment image
+        </label>
+        <input
+          id="payment-proof"
+          type="file"
+          accept="image/*"
+          onChange={handleFileChange}
+          className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none ring-cyan-600 focus:ring-2"
+        />
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={cameraActive ? stopCamera : startCamera}
+              disabled={cameraLoading}
+              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-200"
+            >
+              {cameraActive ? "Stop camera" : cameraLoading ? "Opening camera..." : "Use camera"}
+            </button>
+            {cameraActive ? (
+              <button
+                type="button"
+                onClick={capturePhoto}
+                className="rounded-full bg-cyan-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800"
+              >
+                Capture photo
+              </button>
+            ) : null}
+          </div>
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            className={`mt-3 aspect-video w-full rounded-md bg-slate-900 object-cover ${cameraActive ? "block" : "hidden"}`}
+          />
+          {proofUrl ? (
+            <img
+              src={proofUrl}
+              alt="Payment proof preview"
+              className="mt-3 max-h-48 w-full rounded-md border border-slate-200 object-contain"
+            />
+          ) : null}
+        </div>
+        {proofName ? <p className="mt-2 text-xs font-semibold text-slate-600">{proofName}</p> : null}
+        {error ? <p className="mt-2 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
+
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={Boolean(error)}
+            className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            Save and mark paid
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 

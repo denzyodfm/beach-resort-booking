@@ -6,6 +6,7 @@ import { saveDemoBooking } from "@/lib/demo-bookings";
 import { getDemoBookings } from "@/lib/demo-bookings";
 import type { Booking, Room } from "@/lib/types";
 import { nightsBetween } from "@/lib/resort-data";
+import { hasSupabaseEnv } from "@/lib/supabase-browser";
 
 type AvailabilityState = "idle" | "checking" | "available" | "unavailable";
 type CottageCategory = Room["type"];
@@ -72,6 +73,7 @@ export function BookingForm({
   const [availability, setAvailability] = useState<AvailabilityState>("idle");
   const [message, setMessage] = useState("");
   const [unavailableRanges, setUnavailableRanges] = useState<UnavailableRange[]>([]);
+  const supabaseConfigured = hasSupabaseEnv();
 
   const selectedRoom = filteredRooms.find((room) => room.id === roomId) || filteredRooms[0] || rooms[0];
   const normalizedCheckIn = normalizeBookingDate(checkIn);
@@ -84,7 +86,7 @@ export function BookingForm({
   );
 
   const mergeUnavailableRanges = useCallback((apiRanges: UnavailableRange[] = []) => {
-    const localRanges = getUnavailableRanges(getDemoBookings(), roomId);
+    const localRanges = supabaseConfigured ? [] : getUnavailableRanges(getDemoBookings(), roomId);
     const ranges = [...apiRanges, ...localRanges];
     const seen = new Set<string>();
 
@@ -94,7 +96,7 @@ export function BookingForm({
       seen.add(key);
       return true;
     });
-  }, [roomId]);
+  }, [roomId, supabaseConfigured]);
 
   function selectCategory(option: CottageCategory) {
     const nextRoom = rooms.find((room) => room.type === option);
@@ -121,7 +123,7 @@ export function BookingForm({
       message?: string;
       unavailableRanges?: UnavailableRange[];
     };
-    const localConflict = findBookingConflict(getDemoBookings(), roomId, normalizedCheckIn, normalizedCheckOut);
+    const localConflict = supabaseConfigured ? null : findBookingConflict(getDemoBookings(), roomId, normalizedCheckIn, normalizedCheckOut);
     const mergedRanges = mergeUnavailableRanges(result.unavailableRanges);
     const available = result.available && !localConflict;
 
@@ -158,23 +160,24 @@ export function BookingForm({
       }),
     });
 
-    const result = (await response.json()) as { id?: string; booking?: Booking; message: string };
+    const result = (await response.json()) as { id?: string; booking?: Booking | Record<string, unknown>; message: string };
     setMessage(result.message);
-    if (response.ok && selectedRoom) {
-      saveDemoBooking(result.booking || {
-        id: result.id || `DEMO-${Date.now()}`,
-        roomId,
-        roomName: selectedRoom.name,
-        guestName,
-        guestEmail,
-        guestPhone,
-        checkIn: normalizedCheckIn,
-        checkOut: normalizedCheckOut,
-        guests,
-        totalPrice: total,
-        status: "pending",
-        paymentStatus: "unpaid",
-        createdAt: new Date().toISOString().slice(0, 10),
+    if (response.ok && selectedRoom && !supabaseConfigured) {
+      const source = (result.booking || {}) as Record<string, unknown>;
+      saveDemoBooking({
+        id: String(source.id || source.booking_number || result.id || `DEMO-${Date.now()}`),
+        roomId: String(source.roomId || source.room_id || roomId),
+        roomName: String((source.rooms as { name?: string } | undefined)?.name || source.roomName || selectedRoom.name),
+        guestName: String(source.guestName || source.guest_name || guestName),
+        guestEmail: String(source.guestEmail || source.guest_email || guestEmail || ""),
+        guestPhone: String(source.guestPhone || source.guest_phone || guestPhone),
+        checkIn: String(source.checkIn || source.check_in || normalizedCheckIn),
+        checkOut: String(source.checkOut || source.check_out || normalizedCheckOut),
+        guests: Number(source.guests || source.guest_count || guests),
+        totalPrice: Number(source.totalPrice || source.total_amount || total),
+        status: (source.status || "pending") as Booking["status"],
+        paymentStatus: (source.paymentStatus || source.payment_status || "unpaid") as Booking["paymentStatus"],
+        createdAt: String(source.createdAt || source.created_at || new Date().toISOString()).slice(0, 10),
       });
       setAvailability("available");
     }

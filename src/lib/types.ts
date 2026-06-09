@@ -40,5 +40,11 @@ export type Booking = {
   totalPrice: number;
   status: BookingStatus;
   paymentStatus: PaymentStatus;
+  paymentNote?: string;
+  paymentAmountPaid?: number;
+  paymentProofUrl?: string;
+  paymentProofName?: string;
+  refundAmount?: number;
+  refundReason?: string;
   createdAt: string;
 };

@@ -1,6 +1,5 @@
 import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
 import {
-  addServerDemoBooking,
   getServerDemoBookings,
   updateServerDemoBooking,
 } from "@/lib/demo-booking-store";
@@ -9,7 +8,6 @@ import {
   buildBookingConfirmationMessage,
   calculateTotal,
   canGuestCancel,
-  findBookingConflict,
 } from "@/lib/booking-logic";
 import { sendBookingConfirmationEmail } from "@/lib/email";
 
@@ -59,58 +57,9 @@ export async function POST(request: Request) {
   }
 
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    const demoBookings = getServerDemoBookings();
-    const conflict = findBookingConflict(demoBookings, body.roomId, body.checkIn, body.checkOut);
-
-    if (conflict) {
-      return Response.json(
-        { message: `Those dates are unavailable. ${room.name} is already held from ${conflict.checkIn} to ${conflict.checkOut}.` },
-        { status: 409 },
-      );
-    }
-
-    const demoId = `DEMO-${Date.now()}`;
-    const booking = addServerDemoBooking({
-      id: demoId,
-      roomId: body.roomId,
-      roomName: room.name,
-      guestName: body.guestName,
-      guestEmail: body.guestEmail || "",
-      guestPhone: body.guestPhone,
-      checkIn: body.checkIn,
-      checkOut: body.checkOut,
-      guests: body.guests,
-      totalPrice: total,
-      status: "pending",
-      paymentStatus: "unpaid",
-      createdAt: new Date().toISOString().slice(0, 10),
-    });
-    const email = await sendBookingConfirmationEmail({
-      to: body.guestEmail,
-      guestName: body.guestName,
-      bookingId: demoId,
-      cottageName: room.name,
-      checkIn: body.checkIn,
-      checkOut: body.checkOut,
-      totalAmount: total,
-    });
-
     return Response.json({
-      id: demoId,
-      booking,
-      status: "pending",
-      paymentStatus: "unpaid",
-      message: `${buildBookingConfirmationMessage({
-        id: demoId,
-        roomName: room.name,
-        guestName: body.guestName,
-        guestEmail: body.guestEmail,
-        guestPhone: body.guestPhone,
-        checkIn: body.checkIn,
-        checkOut: body.checkOut,
-        totalPrice: total,
-      })} ${email.sent ? `Confirmation email sent to ${body.guestEmail}.` : email.reason}`,
-    });
+      message: "Supabase is not configured on this server, so bookings cannot be saved.",
+    }, { status: 503 });
   }
 
   const supabase = createAdminClient();
