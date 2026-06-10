@@ -14,7 +14,7 @@ export function AuthForm() {
   const requestedRole = searchParams.get("role");
   const defaultRole: DemoRole = canManageResort(requestedRole) ? requestedRole : "guest";
   const [role, setRole] = useState<DemoRole>(defaultRole);
-  const [name, setName] = useState(canManageResort(role) ? `BOLIHON ${role}` : "");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
@@ -84,7 +84,7 @@ export function AuthForm() {
             type="button"
             onClick={() => {
               setRole(item);
-              setName(canManageResort(item) ? `BOLIHON ${item}` : "");
+              setName("");
               setMessage("");
             }}
             className={`rounded-full px-3 py-2 capitalize transition ${role === item ? "bg-bolihon-green text-white" : "text-slate-600 hover:bg-white"}`}
@@ -94,7 +94,7 @@ export function AuthForm() {
         ))}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4">
         <Field label="Name" value={name} onChange={setName} />
         <Field label="Email" type="email" value={email} onChange={setEmail} required={canManageResort(role) && supabaseConfigured} />
         {canManageResort(role) && supabaseConfigured ? (
