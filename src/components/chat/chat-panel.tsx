@@ -7,7 +7,7 @@ import {
   getOrCreateConversation,
   type ChatConversation,
 } from "@/lib/demo-chat";
-import { useDemoAuth } from "@/lib/demo-auth";
+import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
 
 type GuestContact = {
   id: string;
@@ -53,7 +53,7 @@ export function ChatPanel() {
 
   useEffect(() => {
     function sync() {
-      if (user?.role === "admin") {
+      if (canManageResort(user?.role)) {
         const all = getConversations().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         setConversations(all);
         setSelectedId((current) => current || all[0]?.id || "");
@@ -111,8 +111,8 @@ export function ChatPanel() {
     if (!selected || !draft.trim()) return;
 
     const sender =
-      user?.role === "admin"
-        ? { role: "admin" as const, name: user.name }
+      canManageResort(user?.role)
+        ? { role: user.role, name: user.name }
         : { role: "guest" as const, name: activeGuest?.name || "Guest" };
 
     addMessage(selected.id, sender, draft);
@@ -150,7 +150,7 @@ export function ChatPanel() {
     );
   }
 
-  if (user?.role !== "admin") {
+  if (!canManageResort(user?.role)) {
     return (
       <section className="mx-auto flex min-h-[70dvh] max-w-2xl flex-col rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 p-5">
@@ -205,7 +205,7 @@ export function ChatPanel() {
     <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
       <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">
-          {user?.role === "admin" ? "Guest inbox" : "BOLIHON support"}
+          {canManageResort(user?.role) ? "Guest inbox" : "BOLIHON support"}
         </p>
         <h1 className="mt-2 text-2xl font-bold text-slate-950">Messages</h1>
         <div className="mt-5 grid gap-2">
@@ -240,13 +240,13 @@ export function ChatPanel() {
             {selected ? `${selected.guestName} - ${selected.guestPhone || selected.guestEmail}` : "Select a conversation"}
           </p>
           <h2 className="mt-1 text-2xl font-bold text-slate-950">
-            {user?.role === "admin" ? "Reply to guest" : "Message admin"}
+            {canManageResort(user?.role) ? "Reply to guest" : "Message admin"}
           </h2>
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-5">
           {selected?.messages.map((message) => {
-            const own = user?.role === "admin" ? message.senderRole === "admin" : message.senderRole === "guest";
+            const own = canManageResort(user?.role) ? canManageResort(message.senderRole) : message.senderRole === "guest";
             return (
               <div key={message.id} className={`flex ${own ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[78%] rounded-lg px-4 py-3 text-sm shadow-sm ${own ? "bg-bolihon-green text-white" : "bg-white text-slate-700"}`}>
@@ -268,7 +268,7 @@ export function ChatPanel() {
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder={user?.role === "admin" ? "Type admin reply..." : "Type your message..."}
+            placeholder={canManageResort(user?.role) ? "Type reply..." : "Type your message..."}
             disabled={!selected}
             className="min-h-12 flex-1 rounded-md border border-slate-300 px-4 outline-none ring-bolihon-green focus:ring-2 disabled:bg-slate-100"
           />

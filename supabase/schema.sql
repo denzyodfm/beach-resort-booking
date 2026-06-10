@@ -4,7 +4,7 @@
 create extension if not exists "pgcrypto";
 create extension if not exists "btree_gist";
 
-create type public.app_role as enum ('guest', 'admin');
+create type public.app_role as enum ('guest', 'staff', 'admin');
 create type public.room_type as enum ('cove', 'rock', 'rd', 'hall', 'pavillon');
 create type public.booking_status as enum (
   'draft',
@@ -253,7 +253,7 @@ as $$
     select 1
     from public.users
     where id = auth.uid()
-      and role = 'admin'
+      and role in ('admin', 'staff')
   );
 $$;
 

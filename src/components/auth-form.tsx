@@ -2,17 +2,19 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
-import { useDemoAuth, type DemoRole } from "@/lib/demo-auth";
+import { canManageResort, useDemoAuth, type DemoRole } from "@/lib/demo-auth";
 import { hasSupabaseEnv } from "@/lib/supabase-browser";
 
 const adminCode = "BOLIHON-ADMIN";
+const managementRoles = ["admin", "staff"] as const;
 
 export function AuthForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const defaultRole = searchParams.get("role") === "admin" ? "admin" : "guest";
+  const requestedRole = searchParams.get("role");
+  const defaultRole: DemoRole = canManageResort(requestedRole) ? requestedRole : "guest";
   const [role, setRole] = useState<DemoRole>(defaultRole);
-  const [name, setName] = useState(role === "admin" ? "BOLIHON Admin" : "");
+  const [name, setName] = useState(canManageResort(role) ? `BOLIHON ${role}` : "");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
@@ -22,7 +24,7 @@ export function AuthForm() {
   const { login, loginWithPassword } = useDemoAuth();
   const supabaseConfigured = hasSupabaseEnv();
 
-  const destination = useMemo(() => (role === "admin" ? "/admin" : "/rooms"), [role]);
+  const destination = useMemo(() => (canManageResort(role) ? "/admin" : "/rooms"), [role]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -30,9 +32,9 @@ export function AuthForm() {
     setSubmitting(true);
 
     try {
-      if (role === "admin" && supabaseConfigured) {
+      if (canManageResort(role) && supabaseConfigured) {
         if (!email.trim() || !password) {
-          setMessage("Enter the Supabase admin email and password.");
+          setMessage("Enter the Supabase staff/admin email and password.");
           return;
         }
 
@@ -41,7 +43,7 @@ export function AuthForm() {
         return;
       }
 
-      if (role === "admin" && code !== adminCode) {
+      if (canManageResort(role) && code !== adminCode) {
         setMessage("Enter the correct admin access code. Demo code: BOLIHON-ADMIN");
         return;
       }
@@ -53,7 +55,7 @@ export function AuthForm() {
 
       login({
         role,
-        name: name.trim() || (role === "admin" ? "BOLIHON Admin" : "Guest"),
+        name: name.trim() || (canManageResort(role) ? `BOLIHON ${role}` : "Guest"),
         email: email.trim(),
         phone: phone.trim(),
       });
@@ -71,21 +73,21 @@ export function AuthForm() {
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-700">Account access</p>
         <h1 className="mt-2 text-3xl font-bold text-slate-950">Sign in to BOLIHON</h1>
         <p className="mt-3 text-sm leading-6 text-slate-600">
-          Guests can browse cottage details, make bookings, and chat with admin. Admin users can manage bookings, cottage details, payments, and guest messages.
+          Guests can browse cottage details, make bookings, and chat with staff. Admin and staff users can manage bookings, cottage details, payments, and guest messages.
         </p>
       </div>
 
-      <div className="grid grid-cols-2 rounded-full bg-slate-100 p-1 text-sm font-semibold">
-        {(["guest", "admin"] as const).map((item) => (
+      <div className="grid grid-cols-3 rounded-full bg-slate-100 p-1 text-sm font-semibold">
+        {(["guest", ...managementRoles] as const).map((item) => (
           <button
             key={item}
             type="button"
             onClick={() => {
               setRole(item);
-              setName(item === "admin" ? "BOLIHON Admin" : "");
+              setName(canManageResort(item) ? `BOLIHON ${item}` : "");
               setMessage("");
             }}
-            className={`rounded-full px-4 py-2 capitalize transition ${role === item ? "bg-bolihon-green text-white" : "text-slate-600 hover:bg-white"}`}
+            className={`rounded-full px-3 py-2 capitalize transition ${role === item ? "bg-bolihon-green text-white" : "text-slate-600 hover:bg-white"}`}
           >
             {item} login
           </button>
@@ -94,14 +96,14 @@ export function AuthForm() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Name" value={name} onChange={setName} />
-        <Field label="Email" type="email" value={email} onChange={setEmail} required={role === "admin" && supabaseConfigured} />
-        {role === "admin" && supabaseConfigured ? (
+        <Field label="Email" type="email" value={email} onChange={setEmail} required={canManageResort(role) && supabaseConfigured} />
+        {canManageResort(role) && supabaseConfigured ? (
           <Field label="Password" type="password" value={password} onChange={setPassword} />
         ) : null}
         {role === "guest" ? (
           <Field label="Cellphone no." type="tel" value={phone} onChange={setPhone} required />
         ) : null}
-        {role === "admin" && !supabaseConfigured ? (
+        {canManageResort(role) && !supabaseConfigured ? (
           <Field label="Admin code" type="password" value={code} onChange={setCode} />
         ) : null}
       </div>

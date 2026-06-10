@@ -9,7 +9,7 @@ import {
   getConversations,
   getOrCreateConversation,
 } from "@/lib/demo-chat";
-import { useDemoAuth } from "@/lib/demo-auth";
+import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
 
 type GuestContact = {
   id: string;
@@ -57,7 +57,7 @@ export function FloatingChat() {
 
   const stats = getChatStats();
   const adminConversations =
-    user?.role === "admin"
+    canManageResort(user?.role)
       ? getConversations().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       : [];
   const selectedAdminConversation =
@@ -110,7 +110,7 @@ export function FloatingChat() {
     event.preventDefault();
     if (!selectedAdminConversation || !adminDraft.trim() || !user) return;
 
-    addMessage(selectedAdminConversation.id, { role: "admin", name: user.name }, adminDraft);
+    addMessage(selectedAdminConversation.id, { role: canManageResort(user.role) ? user.role : "admin", name: user.name }, adminDraft);
     setAdminDraft("");
   }
 
@@ -135,7 +135,7 @@ export function FloatingChat() {
             </button>
           </div>
 
-          {user?.role === "admin" ? (
+          {canManageResort(user?.role) ? (
             <>
               <div className="border-b border-slate-200 bg-slate-50 p-3">
                 <div className="flex gap-2 overflow-x-auto pb-1">
@@ -161,7 +161,7 @@ export function FloatingChat() {
 
               <div className="max-h-[42dvh] space-y-3 overflow-y-auto bg-slate-50 p-4 sm:max-h-80">
                 {selectedAdminConversation?.messages.map((message) => {
-                  const own = message.senderRole === "admin";
+                  const own = canManageResort(message.senderRole);
                   return (
                     <div key={message.id} className={`flex ${own ? "justify-end" : "justify-start"}`}>
                       <div className={`max-w-[82%] rounded-lg px-3 py-2 text-sm ${own ? "bg-bolihon-green text-white" : "bg-white text-slate-700 shadow-sm"}`}>
@@ -177,7 +177,7 @@ export function FloatingChat() {
                 <input
                   value={adminDraft}
                   onChange={(event) => setAdminDraft(event.target.value)}
-                  placeholder={selectedAdminConversation ? "Type admin reply..." : "No guest selected"}
+                  placeholder={selectedAdminConversation ? "Type reply..." : "No guest selected"}
                   disabled={!selectedAdminConversation}
                   className="min-h-11 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none ring-bolihon-green focus:ring-2 disabled:bg-slate-100"
                 />

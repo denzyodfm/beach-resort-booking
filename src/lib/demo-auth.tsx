@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { createClientBrowser, hasSupabaseEnv } from "@/lib/supabase-browser";
 
-export type DemoRole = "guest" | "admin";
+export type DemoRole = "guest" | "staff" | "admin";
 
 export type DemoUser = {
   id: string;
@@ -87,9 +87,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const fullUser = await getSupabaseProfileUser(data.user.id, data.user.email || email);
 
-        if (fullUser.role !== "admin") {
+        if (!canManageResort(fullUser.role)) {
           await supabase.auth.signOut();
-          throw new Error("This Supabase user is not marked as admin.");
+          throw new Error("This Supabase user is not marked as admin or staff.");
         }
 
         setUser(fullUser);
@@ -146,6 +146,10 @@ async function getSupabaseProfileUser(id: string, fallbackEmail: string): Promis
     name: data.full_name || data.email || fallbackEmail || "Supabase user",
     email: data.email || fallbackEmail,
     phone: data.phone || "",
-    role: data.role === "admin" ? "admin" : "guest",
+    role: canManageResort(data.role) ? data.role : "guest",
   };
+}
+
+export function canManageResort(role: string | null | undefined): role is "admin" | "staff" {
+  return role === "admin" || role === "staff";
 }

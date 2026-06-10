@@ -3,7 +3,7 @@
 export type ChatMessage = {
   id: string;
   conversationId: string;
-  senderRole: "guest" | "admin";
+  senderRole: "guest" | "staff" | "admin";
   senderName: string;
   body: string;
   createdAt: string;
@@ -70,7 +70,7 @@ export function getOrCreateConversation(guest: {
 
 export function addMessage(
   conversationId: string,
-  sender: { role: "guest" | "admin"; name: string },
+  sender: { role: "guest" | "staff" | "admin"; name: string },
   body: string,
 ) {
   const trimmed = body.trim();
