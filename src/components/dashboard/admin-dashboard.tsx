@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isPaidEnoughToConfirm } from "@/lib/booking-logic";
 import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
+import { useDemoAuth } from "@/lib/demo-auth";
 import { nightsBetween, rooms, sampleBookings } from "@/lib/resort-data";
 import { hasSupabaseEnv } from "@/lib/supabase-browser";
-import type { Booking, BookingStatus, PaymentStatus, Room } from "@/lib/types";
+import type { Booking, BookingStatus, PaymentLog, PaymentStatus, Room } from "@/lib/types";
 
 type BookingAction = "approve" | "cancel";
 type PaymentAction = "verify" | "refund";
@@ -14,10 +15,32 @@ type PaymentDetails = {
   amountPaid: number;
   proofUrl: string;
   proofName: string;
+  paidBy: string;
 };
 type RefundDetails = {
   amount: number;
   reason: string;
+};
+type ManagedRole = "guest" | "staff" | "admin";
+type ManagedUser = {
+  id: string;
+  email: string;
+  fullName: string;
+  phone: string;
+  role: ManagedRole;
+  disabled: boolean;
+  emailConfirmed: boolean;
+  lastSignInAt: string;
+  createdAt: string;
+};
+type UserFormState = {
+  id: string;
+  email: string;
+  fullName: string;
+  phone: string;
+  role: ManagedRole;
+  password: string;
+  disabled: boolean;
 };
 
 const defaultAmenityOptions = [
@@ -61,6 +84,30 @@ function formatPeso(value: number | undefined) {
   return `Php${(Number.isFinite(value) ? value || 0 : 0).toLocaleString()}`;
 }
 
+function getRemainingBalance(booking: Booking) {
+  return Math.max(0, booking.totalPrice - (booking.paymentAmountPaid || 0));
+}
+
+function normalizePaymentHistory(value: unknown): PaymentLog[] {
+  return Array.isArray(value)
+    ? value
+        .map((item) => item as Partial<PaymentLog>)
+        .filter((item) => item.type === "payment" || item.type === "refund")
+        .map((item, index) => ({
+          id: String(item.id || `payment-log-${index}`),
+          type: item.type as "payment" | "refund",
+          amount: Number(item.amount || 0),
+          note: String(item.note || ""),
+          proofName: item.proofName ? String(item.proofName) : "",
+          paidBy: item.paidBy ? String(item.paidBy) : "",
+          actorName: String(item.actorName || "Unknown user"),
+          actorRole: String(item.actorRole || "staff"),
+          createdAt: String(item.createdAt || new Date().toISOString()),
+          balanceAfter: Number(item.balanceAfter || 0),
+        }))
+    : [];
+}
+
 function parsePaymentDetails(source: Record<string, unknown>) {
   const specialRequests = source.specialRequests || source.special_requests;
   if (!specialRequests || typeof specialRequests !== "string") {
@@ -69,6 +116,7 @@ function parsePaymentDetails(source: Record<string, unknown>) {
       paymentAmountPaid: Number(source.paymentAmountPaid || 0),
       paymentProofUrl: String(source.paymentProofUrl || ""),
       paymentProofName: String(source.paymentProofName || ""),
+      paymentHistory: normalizePaymentHistory(source.paymentHistory),
       refundAmount: Number(source.refundAmount || 0),
       refundReason: String(source.refundReason || ""),
     };
@@ -81,6 +129,7 @@ function parsePaymentDetails(source: Record<string, unknown>) {
       paymentAmountPaid: Number(parsed.paymentAmountPaid || source.paymentAmountPaid || 0),
       paymentProofUrl: String(parsed.paymentProofUrl || source.paymentProofUrl || ""),
       paymentProofName: String(parsed.paymentProofName || source.paymentProofName || ""),
+      paymentHistory: normalizePaymentHistory(parsed.paymentHistory || source.paymentHistory),
       refundAmount: Number(parsed.refundAmount || source.refundAmount || 0),
       refundReason: String(parsed.refundReason || source.refundReason || ""),
     };
@@ -90,6 +139,7 @@ function parsePaymentDetails(source: Record<string, unknown>) {
       paymentAmountPaid: Number(source.paymentAmountPaid || 0),
       paymentProofUrl: String(source.paymentProofUrl || ""),
       paymentProofName: String(source.paymentProofName || ""),
+      paymentHistory: normalizePaymentHistory(source.paymentHistory),
       refundAmount: Number(source.refundAmount || 0),
       refundReason: String(source.refundReason || ""),
     };
@@ -118,6 +168,7 @@ function normalizeBooking(row: Booking | Record<string, unknown>): Booking {
     paymentAmountPaid: paymentDetails.paymentAmountPaid,
     paymentProofUrl: paymentDetails.paymentProofUrl,
     paymentProofName: paymentDetails.paymentProofName,
+    paymentHistory: paymentDetails.paymentHistory,
     refundAmount: paymentDetails.refundAmount,
     refundReason: paymentDetails.refundReason,
     createdAt: String(source.createdAt || source.created_at || new Date().toISOString()).slice(0, 10),
@@ -125,6 +176,7 @@ function normalizeBooking(row: Booking | Record<string, unknown>): Booking {
 }
 
 export function AdminDashboard() {
+  const { user } = useDemoAuth();
   const [bookings, setBookings] = useState(sampleBookings);
   const [cottages, setCottages] = useState(rooms);
 
@@ -205,18 +257,51 @@ export function AdminDashboard() {
           ? (() => {
               const paymentDetails = details && "amountPaid" in details ? details : undefined;
               const refundDetails = details && "amount" in details ? details : undefined;
+              const now = new Date().toISOString();
+              const actorName = user?.name || user?.email || "Unknown user";
+              const actorRole = user?.role || "staff";
+              const nextPaid =
+                action === "verify"
+                  ? Math.min(booking.totalPrice, (booking.paymentAmountPaid || 0) + (paymentDetails?.amountPaid || 0))
+                  : booking.paymentAmountPaid || 0;
               const paymentStatus: PaymentStatus =
                 action === "verify"
-                  ? (paymentDetails?.amountPaid || 0) >= booking.totalPrice
+                  ? nextPaid >= booking.totalPrice
                     ? "paid"
                     : "deposit_paid"
                   : "refunded";
+              const paymentLog: PaymentLog | null =
+                action === "verify" && paymentDetails
+                  ? {
+                      id: `PAY-${Date.now()}`,
+                      type: "payment",
+                      amount: paymentDetails.amountPaid,
+                      note: paymentDetails.note,
+                      proofName: paymentDetails.proofName,
+                      paidBy: paymentDetails.paidBy,
+                      actorName,
+                      actorRole,
+                      createdAt: now,
+                      balanceAfter: Math.max(0, booking.totalPrice - nextPaid),
+                    }
+                  : action === "refund" && refundDetails
+                    ? {
+                        id: `REF-${Date.now()}`,
+                        type: "refund",
+                        amount: refundDetails.amount,
+                        note: refundDetails.reason,
+                        actorName,
+                        actorRole,
+                        createdAt: now,
+                      }
+                    : null;
               const updates: Partial<Booking> = {
                 paymentStatus,
                 paymentNote: action === "verify" ? paymentDetails?.note || "" : booking.paymentNote,
-                paymentAmountPaid: action === "verify" ? paymentDetails?.amountPaid || 0 : booking.paymentAmountPaid,
+                paymentAmountPaid: nextPaid,
                 paymentProofUrl: action === "verify" ? paymentDetails?.proofUrl || "" : booking.paymentProofUrl,
                 paymentProofName: action === "verify" ? paymentDetails?.proofName || "" : booking.paymentProofName,
+                paymentHistory: paymentLog ? [...(booking.paymentHistory || []), paymentLog] : booking.paymentHistory || [],
                 refundAmount: action === "refund" ? refundDetails?.amount || 0 : booking.refundAmount,
                 refundReason: action === "refund" ? refundDetails?.reason || "" : booking.refundReason,
               };
@@ -231,6 +316,7 @@ export function AdminDashboard() {
                   paymentAmountPaid: updates.paymentAmountPaid,
                   paymentProofUrl: updates.paymentProofUrl,
                   paymentProofName: updates.paymentProofName,
+                  paymentHistory: updates.paymentHistory,
                   refundAmount: updates.refundAmount,
                   refundReason: updates.refundReason,
                 }),
@@ -252,6 +338,8 @@ export function AdminDashboard() {
         <StatCard label="Confirmed bookings" value={stats.confirmed.toString()} detail="Arrivals scheduled" tone="emerald" />
         <StatCard label="Total revenue" value={formatPeso(stats.revenue)} detail="Paid and deposits" tone="coral" />
       </section>
+
+      {user?.role === "admin" ? <UserAdministration /> : null}
 
       <section className="grid gap-6">
         <CalendarView bookings={bookings} />
@@ -331,6 +419,232 @@ function StatCard({
       <p className="mt-5 text-3xl font-bold text-slate-950">{value}</p>
       <p className="mt-1 text-sm text-slate-500">{detail}</p>
     </article>
+  );
+}
+
+function emptyUserForm(): UserFormState {
+  return {
+    id: "",
+    email: "",
+    fullName: "",
+    phone: "",
+    role: "staff",
+    password: "",
+    disabled: false,
+  };
+}
+
+function UserAdministration() {
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [form, setForm] = useState<UserFormState>(() => emptyUserForm());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const editing = Boolean(form.id);
+
+  useEffect(() => {
+    void loadUsers();
+  }, []);
+
+  async function loadUsers() {
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/admin/users");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to load users.");
+      setUsers(data);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load users.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function editUser(user: ManagedUser) {
+    setForm({
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      phone: user.phone,
+      role: user.role,
+      password: "",
+      disabled: user.disabled,
+    });
+    setMessage("");
+  }
+
+  async function saveUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/admin/users", {
+        method: editing ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to save user.");
+
+      setForm(emptyUserForm());
+      setMessage(editing ? "User updated." : "User created.");
+      await loadUsers();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save user.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteUser(user: ManagedUser) {
+    if (!window.confirm(`Delete ${user.email}? This removes the Supabase Auth user.`)) return;
+
+    setMessage("");
+    try {
+      const response = await fetch(`/api/admin/users?id=${encodeURIComponent(user.id)}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to delete user.");
+
+      if (form.id === user.id) setForm(emptyUserForm());
+      setMessage("User deleted.");
+      await loadUsers();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to delete user.");
+    }
+  }
+
+  function updateForm(updates: Partial<UserFormState>) {
+    setForm((current) => ({ ...current, ...updates }));
+  }
+
+  return (
+    <Panel title="User administration" eyebrow="Admin only">
+      <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
+        <form onSubmit={saveUser} className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div>
+            <h3 className="font-bold text-slate-950">{editing ? "Edit user" : "Add user"}</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Admins can create accounts, update privileges, disable sign-in, or remove users.
+            </p>
+          </div>
+
+          <EditField label="Full name" value={form.fullName} onChange={(fullName) => updateForm({ fullName })} />
+          <EditField label="Email" type="email" value={form.email} onChange={(email) => updateForm({ email })} />
+          <EditField label="Phone" value={form.phone} onChange={(phone) => updateForm({ phone })} />
+          <EditField
+            label={editing ? "New password (optional)" : "Password"}
+            type="password"
+            value={form.password}
+            onChange={(password) => updateForm({ password })}
+          />
+
+          <div>
+            <label htmlFor="managed-role" className="text-sm font-semibold text-slate-700">
+              Privileges
+            </label>
+            <select
+              id="managed-role"
+              value={form.role}
+              onChange={(event) => updateForm({ role: event.target.value as ManagedRole })}
+              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none ring-cyan-600 focus:ring-2"
+            >
+              <option value="guest">Guest</option>
+              <option value="staff">Staff - manage operations</option>
+              <option value="admin">Admin - manage users and operations</option>
+            </select>
+          </div>
+
+          <label className="flex items-start gap-3 rounded-md border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={form.disabled}
+              onChange={(event) => updateForm({ disabled: event.target.checked })}
+              className="mt-0.5 h-4 w-4"
+            />
+            Disable this user
+          </label>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              disabled={saving}
+              className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {saving ? "Saving..." : editing ? "Save changes" : "Create user"}
+            </button>
+            {editing ? (
+              <button
+                type="button"
+                onClick={() => setForm(emptyUserForm())}
+                className="rounded-full border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-white"
+              >
+                Cancel edit
+              </button>
+            ) : null}
+          </div>
+          {message ? <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{message}</p> : null}
+        </form>
+
+        <div className="overflow-hidden rounded-lg border border-slate-200">
+          <div className="grid gap-3 bg-slate-50 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
+            <div>
+              <h3 className="font-bold text-slate-950">Users and privileges</h3>
+              <p className="mt-1 text-sm text-slate-500">Staff can manage resort operations. Only admins can manage users.</p>
+            </div>
+            <button
+              type="button"
+              onClick={loadUsers}
+              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white"
+            >
+              Refresh
+            </button>
+          </div>
+          <div className="divide-y divide-slate-200">
+            {users.map((user) => (
+              <article key={user.id} className="grid gap-4 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="font-bold text-slate-950">{user.fullName || user.email}</h4>
+                    <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold capitalize text-cyan-800">
+                      {user.role}
+                    </span>
+                    {user.disabled ? (
+                      <span className="rounded-full bg-rose-50 px-3 py-1 text-xs font-bold text-rose-700">Disabled</span>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 truncate text-sm text-slate-600">{user.email}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {user.phone || "No phone"} - {user.emailConfirmed ? "Email confirmed" : "Email not confirmed"}
+                    {user.lastSignInAt ? ` - Last sign-in ${new Date(user.lastSignInAt).toLocaleDateString()}` : ""}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => editUser(user)}
+                    className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteUser(user)}
+                    className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </article>
+            ))}
+            {loading ? <EmptyState text="Loading users..." /> : null}
+            {!loading && users.length === 0 ? <EmptyState text="No users found." /> : null}
+          </div>
+        </div>
+      </div>
+    </Panel>
   );
 }
 
@@ -557,6 +871,10 @@ function RecentPayments({
         {recent.map((booking) => (
           <article key={booking.id} className="grid gap-3 rounded-lg border border-slate-200 p-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
+              {(() => {
+                const remainingBalance = getRemainingBalance(booking);
+                return (
+                  <>
               <BookingIdentity booking={booking} />
               <p className="mt-2 text-sm font-semibold text-slate-950">{formatPeso(booking.totalPrice)}</p>
               {booking.paymentAmountPaid ? (
@@ -564,6 +882,9 @@ function RecentPayments({
                   {booking.paymentAmountPaid >= booking.totalPrice ? "Full payment" : "Partial payment"}:{" "}
                   {formatPeso(booking.paymentAmountPaid)}
                 </p>
+              ) : null}
+              {remainingBalance > 0 && booking.paymentAmountPaid ? (
+                <p className="mt-1 text-xs font-bold text-amber-700">Remaining balance: {formatPeso(remainingBalance)}</p>
               ) : null}
               {booking.refundAmount ? (
                 <div className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700">
@@ -586,6 +907,28 @@ function RecentPayments({
                   ) : null}
                 </div>
               ) : null}
+              {booking.paymentHistory?.length ? (
+                <div className="mt-3 grid gap-2 rounded-md bg-cyan-50 px-3 py-2 text-xs text-cyan-900">
+                  <p className="font-bold">Payment log</p>
+                  {booking.paymentHistory.slice(-3).map((entry) => (
+                    <div key={entry.id} className="border-t border-cyan-100 pt-2 first:border-t-0 first:pt-0">
+                      <p className="font-semibold">
+                        {entry.type === "payment" ? "Paid" : "Refunded"} {formatPeso(entry.amount)}
+                        {entry.paidBy ? ` by ${entry.paidBy}` : ""}
+                      </p>
+                      <p>
+                        {entry.type === "payment" ? "Verified" : "Recorded"} by {entry.actorName} ({entry.actorRole}) on{" "}
+                        {new Date(entry.createdAt).toLocaleString()}
+                      </p>
+                      {entry.balanceAfter ? <p>Balance after: {formatPeso(entry.balanceAfter)}</p> : null}
+                      {entry.note ? <p>{entry.note}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+                  </>
+                );
+              })()}
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <StatusPill status={booking.paymentStatus} />
@@ -594,7 +937,7 @@ function RecentPayments({
                   onClick={() => setVerifyingBooking(booking)}
                   className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
                 >
-                  Verify
+                  {booking.paymentStatus === "deposit_paid" ? "Pay balance" : "Verify"}
                 </button>
               ) : null}
               {booking.paymentStatus === "paid" || booking.paymentStatus === "deposit_paid" ? (
@@ -741,10 +1084,11 @@ function PaymentVerificationDialog({
   onClose: () => void;
   onSubmit: (details: PaymentDetails) => void;
 }) {
+  const remainingBalance = getRemainingBalance(booking);
+  const suggestedAmount = remainingBalance || booking.totalPrice;
   const [note, setNote] = useState(booking.paymentNote || "");
-  const [amountPaid, setAmountPaid] = useState(
-    String(booking.paymentAmountPaid || booking.totalPrice || ""),
-  );
+  const [amountPaid, setAmountPaid] = useState(String(suggestedAmount || ""));
+  const [paidBy, setPaidBy] = useState(booking.guestName || "");
   const [proofUrl, setProofUrl] = useState(booking.paymentProofUrl || "");
   const [proofName, setProofName] = useState(booking.paymentProofName || "");
   const [error, setError] = useState("");
@@ -865,9 +1209,15 @@ function PaymentVerificationDialog({
       return;
     }
 
+    if (remainingBalance > 0 && parsedAmount > remainingBalance) {
+      setError(`Amount exceeds the remaining balance of ${formatPeso(remainingBalance)}.`);
+      return;
+    }
+
     onSubmit({
       note: note.trim(),
       amountPaid: parsedAmount,
+      paidBy: paidBy.trim() || booking.guestName,
       proofUrl,
       proofName,
     });
@@ -883,6 +1233,11 @@ function PaymentVerificationDialog({
             <p className="mt-1 text-sm text-slate-500">
               {booking.guestName} - {formatPeso(booking.totalPrice)}
             </p>
+            {booking.paymentAmountPaid ? (
+              <p className="mt-1 text-sm font-semibold text-amber-700">
+                Paid {formatPeso(booking.paymentAmountPaid)} - balance {formatPeso(remainingBalance)}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -904,8 +1259,18 @@ function PaymentVerificationDialog({
           className="mt-2 min-h-28 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none ring-cyan-600 focus:ring-2"
         />
 
+        <label htmlFor="payment-by" className="mt-4 block text-sm font-semibold text-slate-700">
+          Paid by
+        </label>
+        <input
+          id="payment-by"
+          value={paidBy}
+          onChange={(event) => setPaidBy(event.target.value)}
+          className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none ring-cyan-600 focus:ring-2"
+        />
+
         <label htmlFor="payment-amount" className="mt-4 block text-sm font-semibold text-slate-700">
-          Amount paid
+          {remainingBalance > 0 ? "Amount to apply" : "Amount paid"}
         </label>
         <input
           id="payment-amount"
@@ -918,7 +1283,7 @@ function PaymentVerificationDialog({
         />
         {Number(amountPaid) > 0 ? (
           <p className="mt-2 rounded-md bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-800">
-            {Number(amountPaid) >= booking.totalPrice ? "Full payment" : "Partial payment"}
+            {Number(amountPaid) >= remainingBalance ? "Balance will be paid" : "Deposit / partial payment"}
           </p>
         ) : null}
 

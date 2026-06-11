@@ -1,6 +1,9 @@
 import Link from "next/link";
-import { RoomCard } from "@/components/room-card";
+import { CottageCarousel } from "@/components/cottage-carousel";
 import { rooms } from "@/lib/resort-data";
+import type { Room } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
 
 const amenities = ["Lagoon pool", "Beach club", "Spa pavilion", "Sunset dining", "Water sports", "Airport transfers"];
 const testimonials = [
@@ -9,44 +12,18 @@ const testimonials = [
   ["Admin controls are simple enough for daily operations.", "Priya M."],
 ];
 
+function getRandomCottages(cottages: Room[], count: number) {
+  return [...cottages]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, Math.min(count, cottages.length));
+}
+
 export default function Home() {
+  const randomCottages = getRandomCottages(rooms, 8);
+
   return (
     <>
-      <section className="hero-image min-h-[76vh] px-4 py-20 text-white sm:px-6 lg:px-8">
-        <div className="mx-auto flex min-h-[58vh] max-w-7xl flex-col justify-center">
-          <p className="text-sm font-bold uppercase tracking-[0.28em] text-cyan-100">BOLIHON Beach Resort</p>
-          <h1 className="mt-5 max-w-3xl text-5xl font-bold leading-tight sm:text-6xl lg:text-7xl">
-            Book barefoot luxury on a private stretch of coast.
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-cyan-50">
-            Browse Cove, Rock, RD, VGP Hall, and Pavillon cottages with real-time
-            availability checks, guest accounts, and resort operations dashboards.
-          </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link href="/booking" className="rounded-full bg-bolihon-green px-6 py-3 text-center font-semibold text-white transition hover:bg-bolihon-green-dark">
-              Reserve your stay
-            </Link>
-            <Link href="/rooms" className="rounded-full border border-white/70 px-6 py-3 text-center font-semibold text-white transition hover:bg-white/10">
-              Explore cottages
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto grid max-w-7xl gap-8 px-4 py-16 sm:px-6 lg:px-8">
-        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-700">Featured stays</p>
-            <h2 className="mt-2 text-3xl font-bold text-slate-950">Cottages made for the tide schedule</h2>
-          </div>
-          <Link href="/rooms" className="font-semibold text-cyan-800">View all cottages</Link>
-        </div>
-        <div className="grid gap-6 md:grid-cols-3">
-          {rooms.filter((room) => room.featured).slice(0, 3).map((room) => (
-            <RoomCard key={room.id} room={room} />
-          ))}
-        </div>
-      </section>
+      <CottageCarousel rooms={randomCottages} />
 
       <section className="bg-white py-16">
         <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:px-6 lg:grid-cols-[0.8fr_1.2fr] lg:px-8">
@@ -66,9 +43,9 @@ export default function Home() {
       </section>
 
       <section className="mx-auto grid max-w-7xl gap-8 px-4 py-16 sm:px-6 lg:px-8">
-        <div className="grid gap-4 sm:grid-cols-3">
-          {rooms[0].gallery.map((image, index) => (
-            <img key={image} src={image} alt={`BOLIHON gallery ${index + 1}`} className="h-72 w-full rounded-lg object-cover shadow-sm" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          {rooms[0].gallery.slice(1).map((image, index) => (
+            <img key={image} src={image} alt={`BOLIHON gallery ${index + 2}`} className="h-72 w-full rounded-lg object-cover shadow-sm" />
           ))}
         </div>
         <div className="grid gap-4 md:grid-cols-3">

@@ -44,7 +44,21 @@ export type Booking = {
   paymentAmountPaid?: number;
   paymentProofUrl?: string;
   paymentProofName?: string;
+  paymentHistory?: PaymentLog[];
   refundAmount?: number;
   refundReason?: string;
   createdAt: string;
+};
+
+export type PaymentLog = {
+  id: string;
+  type: "payment" | "refund";
+  amount: number;
+  note: string;
+  proofName?: string;
+  paidBy?: string;
+  actorName: string;
+  actorRole: string;
+  createdAt: string;
+  balanceAfter?: number;
 };

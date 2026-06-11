@@ -1,7 +1,7 @@
-import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
+import { createAdminClient, createClientServer, hasSupabaseEnv } from "@/lib/supabase-server";
 import { getServerDemoBookings, updateServerDemoBooking } from "@/lib/demo-booking-store";
 import { isPaidEnoughToConfirm } from "@/lib/booking-logic";
-import type { Booking, BookingStatus, PaymentStatus } from "@/lib/types";
+import type { Booking, BookingStatus, PaymentLog, PaymentStatus } from "@/lib/types";
 
 export async function GET() {
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -27,6 +27,7 @@ export async function PATCH(request: Request) {
     paymentAmountPaid,
     paymentProofUrl,
     paymentProofName,
+    paymentHistory,
     refundAmount,
     refundReason,
   } = await request.json();
@@ -35,6 +36,7 @@ export async function PATCH(request: Request) {
     typeof paymentAmountPaid === "number" ||
     typeof paymentProofUrl === "string" ||
     typeof paymentProofName === "string" ||
+    Array.isArray(paymentHistory) ||
     typeof refundAmount === "number" ||
     typeof refundReason === "string";
 
@@ -54,6 +56,7 @@ export async function PATCH(request: Request) {
     if (typeof paymentAmountPaid === "number") updates.paymentAmountPaid = paymentAmountPaid;
     if (typeof paymentProofUrl === "string") updates.paymentProofUrl = paymentProofUrl;
     if (typeof paymentProofName === "string") updates.paymentProofName = paymentProofName;
+    if (Array.isArray(paymentHistory)) updates.paymentHistory = normalizePaymentHistory(paymentHistory);
     if (typeof refundAmount === "number") updates.refundAmount = refundAmount;
     if (typeof refundReason === "string") updates.refundReason = refundReason;
 
@@ -85,6 +88,12 @@ export async function PATCH(request: Request) {
   if (status) updates.status = status;
   if (hasPaymentDetails) {
     const existingDetails = parseSpecialRequests(existingSpecialRequests);
+    const actor = await getActor();
+    const nextHistory = mergePaymentHistory(
+      normalizePaymentHistory(existingDetails.paymentHistory),
+      normalizePaymentHistory(paymentHistory),
+      actor,
+    );
     updates.special_requests = JSON.stringify({
       ...existingDetails,
       paymentNote: typeof paymentNote === "string" ? paymentNote : existingDetails.paymentNote || "",
@@ -94,6 +103,7 @@ export async function PATCH(request: Request) {
         typeof paymentProofUrl === "string" ? paymentProofUrl : existingDetails.paymentProofUrl || "",
       paymentProofName:
         typeof paymentProofName === "string" ? paymentProofName : existingDetails.paymentProofName || "",
+      paymentHistory: nextHistory,
       refundAmount: typeof refundAmount === "number" ? refundAmount : existingDetails.refundAmount || 0,
       refundReason: typeof refundReason === "string" ? refundReason : existingDetails.refundReason || "",
     });
@@ -114,4 +124,59 @@ function parseSpecialRequests(value: string) {
   } catch {
     return { note: value };
   }
+}
+
+async function getActor() {
+  try {
+    const supabase = await createClientServer();
+    const { data } = await supabase.auth.getUser();
+    if (!data.user) return { name: "Unknown user", role: "staff" };
+
+    const admin = createAdminClient();
+    const { data: profile } = await admin
+      .from("users")
+      .select("email, full_name, role")
+      .eq("id", data.user.id)
+      .single();
+
+    return {
+      name: profile?.full_name || profile?.email || data.user.email || "Unknown user",
+      role: profile?.role || "staff",
+    };
+  } catch {
+    return { name: "Unknown user", role: "staff" };
+  }
+}
+
+function normalizePaymentHistory(value: unknown): PaymentLog[] {
+  return Array.isArray(value)
+    ? value
+        .map((entry) => entry as Partial<PaymentLog>)
+        .filter((entry) => entry.type === "payment" || entry.type === "refund")
+        .map((entry, index) => ({
+          id: String(entry.id || `payment-log-${index}`),
+          type: entry.type as "payment" | "refund",
+          amount: Number(entry.amount || 0),
+          note: String(entry.note || ""),
+          proofName: entry.proofName ? String(entry.proofName) : "",
+          paidBy: entry.paidBy ? String(entry.paidBy) : "",
+          actorName: String(entry.actorName || "Unknown user"),
+          actorRole: String(entry.actorRole || "staff"),
+          createdAt: String(entry.createdAt || new Date().toISOString()),
+          balanceAfter: Number(entry.balanceAfter || 0),
+        }))
+    : [];
+}
+
+function mergePaymentHistory(existing: PaymentLog[], incoming: PaymentLog[], actor: { name: string; role: string }) {
+  const knownIds = new Set(existing.map((entry) => entry.id));
+  const additions = incoming
+    .filter((entry) => !knownIds.has(entry.id))
+    .map((entry) => ({
+      ...entry,
+      actorName: actor.name,
+      actorRole: actor.role,
+    }));
+
+  return [...existing, ...additions];
 }
