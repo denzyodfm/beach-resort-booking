@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   const body = await request.json();
   const room = toRoomRow(body);
   const { image, amenities, ...roomRow } = room;
-  const { data, error } = await supabase.from("rooms").insert(roomRow).select().single();
+  const { data, error } = await saveRoomRow(supabase, "insert", roomRow);
 
   if (error) return Response.json({ message: error.message }, { status: 500 });
 
@@ -49,7 +49,7 @@ export async function PATCH(request: Request) {
   const { id, image, amenities, ...roomRow } = toRoomRow(body);
   const supabase = createAdminClient();
 
-  const { data, error } = await supabase.from("rooms").update(roomRow).eq("id", id).select().single();
+  const { data, error } = await saveRoomRow(supabase, "update", roomRow, id);
   if (error) return Response.json({ message: error.message }, { status: 500 });
 
   const assetError = await syncRoomAssets(supabase, id, data.name, image, amenities);
@@ -110,6 +110,57 @@ function toRoomRow(body: Record<string, unknown>) {
     image: String(body.image || ""),
     amenities: Array.isArray(body.amenities) ? body.amenities.map(String) : [],
   };
+}
+
+async function saveRoomRow(
+  supabase: ReturnType<typeof createAdminClient>,
+  action: "insert" | "update",
+  roomRow: Record<string, unknown>,
+  id?: string,
+) {
+  let nextRow = { ...roomRow };
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const query =
+      action === "insert"
+        ? supabase.from("rooms").insert(nextRow)
+        : supabase.from("rooms").update(nextRow).eq("id", id || "");
+    const result = await query.select().single();
+
+    if (!result.error || !isMissingSchemaColumnError(result.error.message)) {
+      return result;
+    }
+
+    const stripped = stripMissingRoomColumn(nextRow, result.error.message);
+    if (stripped === nextRow) return result;
+    nextRow = stripped;
+  }
+
+  const query =
+    action === "insert"
+      ? supabase.from("rooms").insert(nextRow)
+      : supabase.from("rooms").update(nextRow).eq("id", id || "");
+  return query.select().single();
+}
+
+function isMissingSchemaColumnError(message: string) {
+  return message.includes("schema cache") && message.includes("column");
+}
+
+function stripMissingRoomColumn(row: Record<string, unknown>, message: string) {
+  const nextRow = { ...row };
+
+  if (message.includes("booking_includes")) {
+    delete nextRow.booking_includes;
+    return nextRow;
+  }
+
+  if (message.includes("category_id")) {
+    delete nextRow.category_id;
+    return nextRow;
+  }
+
+  return row;
 }
 
 async function syncRoomAssets(
