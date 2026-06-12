@@ -1,7 +1,11 @@
 import { CottageSearchList } from "@/components/cottage-search-list";
-import { rooms } from "@/lib/resort-data";
+import { getRoomCatalog } from "@/lib/rooms-server";
 
-export default function RoomsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function RoomsPage() {
+  const { rooms, categories } = await getRoomCatalog();
+
   return (
     <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
       <div className="max-w-3xl">
@@ -11,7 +15,7 @@ export default function RoomsPage() {
           Browse cottages by type, compare rates quickly, and book the right space for your stay.
         </p>
       </div>
-      <CottageSearchList rooms={rooms} />
+      <CottageSearchList rooms={rooms} categories={categories} />
     </section>
   );
 }

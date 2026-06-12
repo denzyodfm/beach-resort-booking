@@ -1,9 +1,14 @@
 import { BookingForm } from "@/components/booking/booking-form";
-import { rooms } from "@/lib/resort-data";
+import { getRoomCatalog } from "@/lib/rooms-server";
+
+export const dynamic = "force-dynamic";
 
 export default async function BookingPage(props: PageProps<"/booking">) {
   const searchParams = await props.searchParams;
   const initialRoomId = typeof searchParams.room === "string" ? searchParams.room : undefined;
+  const { rooms, categories } = await getRoomCatalog();
+  const initialRoom = rooms.find((room) => room.id === initialRoomId) || rooms[0];
+  const bookingIncludes = initialRoom?.bookingIncludes?.length ? initialRoom.bookingIncludes : [];
 
   return (
     <section className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-8">
@@ -16,13 +21,13 @@ export default async function BookingPage(props: PageProps<"/booking">) {
         <div className="mt-8 rounded-lg bg-white p-6 shadow-sm">
           <h2 className="text-xl font-semibold text-slate-950">Booking includes</h2>
           <ul className="mt-4 grid gap-3 text-slate-600">
-            <li>Daily breakfast and resort transfers</li>
-            <li>Flexible payment status tracking</li>
-            <li>Guest dashboard visibility after sign in</li>
+            {bookingIncludes.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
           </ul>
         </div>
       </div>
-      <BookingForm rooms={rooms} initialRoomId={initialRoomId} />
+      <BookingForm rooms={rooms} categories={categories} initialRoomId={initialRoomId} />
     </section>
   );
 }

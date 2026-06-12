@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getRoomBySlug, rooms } from "@/lib/resort-data";
+import { rooms } from "@/lib/resort-data";
+import { getRoomBySlugFromCatalog } from "@/lib/rooms-server";
+
+export const dynamic = "force-dynamic";
 
 export function generateStaticParams() {
   return rooms.map((room) => ({ slug: room.slug }));
@@ -8,7 +11,7 @@ export function generateStaticParams() {
 
 export default async function RoomDetailPage(props: PageProps<"/rooms/[slug]">) {
   const { slug } = await props.params;
-  const room = getRoomBySlug(slug);
+  const room = await getRoomBySlugFromCatalog(slug);
 
   if (!room) notFound();
 
@@ -46,6 +49,15 @@ export default async function RoomDetailPage(props: PageProps<"/rooms/[slug]">) 
           </div>
           <h2 className="mt-10 text-3xl font-bold text-slate-950">A closer look</h2>
           <p className="mt-4 text-lg leading-8 text-slate-600">{room.longDescription}</p>
+          <h2 className="mt-10 text-2xl font-bold text-slate-950">Booking includes</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {room.bookingIncludes.map((item) => (
+              <div key={item} className="rounded-lg border border-cyan-100 bg-cyan-50 p-4 font-semibold text-cyan-950">
+                {item}
+              </div>
+            ))}
+          </div>
+          <h2 className="mt-10 text-2xl font-bold text-slate-950">Amenities</h2>
           <div className="mt-8 grid gap-3 sm:grid-cols-2">
             {room.amenities.map((amenity) => (
               <div key={amenity} className="rounded-lg border border-slate-200 bg-white p-4 font-semibold text-slate-800">

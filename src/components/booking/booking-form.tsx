@@ -4,25 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { findBookingConflict, getUnavailableRanges } from "@/lib/booking-logic";
 import { saveDemoBooking } from "@/lib/demo-bookings";
 import { getDemoBookings } from "@/lib/demo-bookings";
-import type { Booking, Room } from "@/lib/types";
+import type { Booking, CottageCategory, Room } from "@/lib/types";
 import { nightsBetween } from "@/lib/resort-data";
 import { hasSupabaseEnv } from "@/lib/supabase-browser";
 
 type AvailabilityState = "idle" | "checking" | "available" | "unavailable";
-type CottageCategory = Room["type"];
+type CottageCategoryId = Room["type"];
 type UnavailableRange = {
   bookingId: string;
   checkIn: string;
   checkOut: string;
   label: string;
-};
-
-const categoryLabels: Record<CottageCategory, string> = {
-  cove: "Cove",
-  rock: "Rock",
-  rd: "RD",
-  hall: "VGP Hall",
-  pavillon: "Pavillon",
 };
 
 const defaultCheckIn = new Date().toISOString().slice(0, 10);
@@ -48,20 +40,22 @@ function normalizeBookingDate(value: string) {
 
 export function BookingForm({
   rooms,
+  categories,
   initialRoomId,
 }: {
   rooms: Room[];
+  categories: CottageCategory[];
   initialRoomId?: string;
 }) {
   const initialRoom = rooms.find((room) => room.id === initialRoomId);
   const categoryOptions = useMemo(
-    () => Array.from(new Set(rooms.map((room) => room.type))) as CottageCategory[],
-    [rooms],
+    () => categories.filter((category) => rooms.some((room) => room.categoryId === category.id)),
+    [categories, rooms],
   );
-  const [category, setCategory] = useState<CottageCategory>(initialRoom?.type || "cove");
-  const [roomId, setRoomId] = useState(initialRoom?.id || rooms.find((room) => room.type === (initialRoom?.type || "cove"))?.id || rooms[0]?.id || "");
+  const [category, setCategory] = useState<CottageCategoryId>(initialRoom?.categoryId || categoryOptions[0]?.id || "cove");
+  const [roomId, setRoomId] = useState(initialRoom?.id || rooms.find((room) => room.categoryId === (initialRoom?.categoryId || categoryOptions[0]?.id))?.id || rooms[0]?.id || "");
   const filteredRooms = useMemo(
-    () => rooms.filter((room) => room.type === category),
+    () => rooms.filter((room) => room.categoryId === category),
     [category, rooms],
   );
   const [checkIn, setCheckIn] = useState(defaultCheckIn);
@@ -98,8 +92,8 @@ export function BookingForm({
     });
   }, [roomId, supabaseConfigured]);
 
-  function selectCategory(option: CottageCategory) {
-    const nextRoom = rooms.find((room) => room.type === option);
+  function selectCategory(option: CottageCategoryId) {
+    const nextRoom = rooms.find((room) => room.categoryId === option);
     setCategory(option);
     setRoomId(nextRoom?.id || "");
     setAvailability("idle");
@@ -215,16 +209,16 @@ export function BookingForm({
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
           {categoryOptions.map((option) => (
             <button
-              key={option}
+              key={option.id}
               type="button"
-              onClick={() => selectCategory(option)}
+              onClick={() => selectCategory(option.id)}
               className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
-                category === option
+                category === option.id
                   ? "border-bolihon-green bg-bolihon-green text-white"
                   : "border-slate-300 bg-white text-slate-700 hover:border-bolihon-green hover:text-bolihon-green"
               }`}
             >
-              {categoryLabels[option]}
+              {option.name}
             </button>
           ))}
         </div>
@@ -276,6 +270,17 @@ export function BookingForm({
             setAvailability("idle");
           }}
         />
+      </div>
+
+      <div className="rounded-md border border-cyan-100 bg-cyan-50 p-4">
+        <p className="text-sm font-semibold text-cyan-950">Booking includes</p>
+        <div className="mt-3 grid gap-2">
+          {(selectedRoom?.bookingIncludes || []).map((item) => (
+            <span key={item} className="rounded-md bg-white px-3 py-2 text-sm font-medium text-cyan-900">
+              {item}
+            </span>
+          ))}
+        </div>
       </div>
 
       <div className="rounded-md border border-cyan-100 bg-cyan-50 p-4">

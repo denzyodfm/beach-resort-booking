@@ -6,7 +6,7 @@ import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
 import { useDemoAuth } from "@/lib/demo-auth";
 import { nightsBetween, rooms, sampleBookings } from "@/lib/resort-data";
 import { hasSupabaseEnv } from "@/lib/supabase-browser";
-import type { Booking, BookingStatus, PaymentLog, PaymentStatus, Room } from "@/lib/types";
+import type { Booking, BookingStatus, CottageCategory, PaymentLog, PaymentStatus, Review, Room } from "@/lib/types";
 
 type BookingAction = "approve" | "cancel";
 type PaymentAction = "verify" | "refund";
@@ -41,6 +41,10 @@ type UserFormState = {
   role: ManagedRole;
   password: string;
   disabled: boolean;
+};
+type CottageCatalogResponse = {
+  rooms: Room[];
+  categories: CottageCategory[];
 };
 
 const defaultAmenityOptions = [
@@ -179,6 +183,8 @@ export function AdminDashboard() {
   const { user } = useDemoAuth();
   const [bookings, setBookings] = useState(sampleBookings);
   const [cottages, setCottages] = useState(rooms);
+  const [categories, setCategories] = useState<CottageCategory[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
 
   useEffect(() => {
     const supabaseConfigured = hasSupabaseEnv();
@@ -211,6 +217,52 @@ export function AdminDashboard() {
 
     return () => window.removeEventListener("bolihon-bookings-updated", syncBookings);
   }, []);
+
+  useEffect(() => {
+    void loadCatalog();
+    void loadReviews();
+  }, []);
+
+  async function loadCatalog() {
+    try {
+      const response = await fetch("/api/admin/rooms");
+      const data = (await response.json()) as CottageCatalogResponse | Room[];
+      if (!response.ok) throw new Error("Unable to load cottages.");
+
+      if (Array.isArray(data)) {
+        setCottages(data);
+        setCategories(Array.from(new Set(data.map((room) => room.categoryId || room.type))).map((id) => ({
+          id,
+          name: data.find((room) => (room.categoryId || room.type) === id)?.categoryName || id,
+          description: "",
+          sortOrder: 0,
+        })));
+        return;
+      }
+
+      setCottages(data.rooms);
+      setCategories(data.categories);
+    } catch {
+      setCottages(rooms);
+      setCategories(Array.from(new Set(rooms.map((room) => room.categoryId))).map((id) => ({
+        id,
+        name: rooms.find((room) => room.categoryId === id)?.categoryName || id,
+        description: "",
+        sortOrder: 0,
+      })));
+    }
+  }
+
+  async function loadReviews() {
+    try {
+      const response = await fetch("/api/admin/reviews");
+      const data = (await response.json()) as Review[];
+      if (!response.ok) throw new Error("Unable to load reviews.");
+      setReviews(data);
+    } catch {
+      setReviews([]);
+    }
+  }
 
   const stats = useMemo(() => {
     const activeBookings = bookings.filter((booking) => booking.status !== "cancelled");
@@ -354,7 +406,14 @@ export function AdminDashboard() {
         <RecentPayments bookings={bookings} onAction={updatePayment} />
       </section>
 
-      <CottageManagement cottages={cottages} onUpdate={setCottages} />
+      <ReviewModeration reviews={reviews} onUpdate={setReviews} />
+      <CottageManagement
+        cottages={cottages}
+        categories={categories}
+        onUpdate={setCottages}
+        onCategoriesUpdate={setCategories}
+        onReload={loadCatalog}
+      />
       <RoomAvailability cottages={cottages} bookings={bookings} />
     </div>
   );
@@ -1355,21 +1414,168 @@ function PaymentVerificationDialog({
   );
 }
 
-function CottageManagement({
-  cottages,
+function ReviewModeration({
+  reviews,
   onUpdate,
 }: {
+  reviews: Review[];
+  onUpdate: React.Dispatch<React.SetStateAction<Review[]>>;
+}) {
+  const pending = reviews.filter((review) => review.status === "pending");
+  const published = reviews.filter((review) => review.status === "published");
+  const [message, setMessage] = useState("");
+
+  async function updateReview(id: string, status: Review["status"]) {
+    setMessage("");
+    onUpdate((current) => current.map((review) => (review.id === id ? { ...review, status } : review)));
+
+    try {
+      const response = await fetch("/api/admin/reviews", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to update review.");
+      onUpdate((current) => current.map((review) => (review.id === id ? data : review)));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update review.");
+    }
+  }
+
+  async function deleteReview(id: string) {
+    if (!window.confirm("Delete this review?")) return;
+
+    setMessage("");
+    const previous = reviews;
+    onUpdate((current) => current.filter((review) => review.id !== id));
+
+    try {
+      const response = await fetch(`/api/admin/reviews?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to delete review.");
+    } catch (error) {
+      onUpdate(previous);
+      setMessage(error instanceof Error ? error.message : "Unable to delete review.");
+    }
+  }
+
+  return (
+    <Panel title="Review approvals" eyebrow="Guest feedback">
+      <div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]">
+        <div>
+          <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-500">Pending approval</h3>
+          <div className="mt-3 grid gap-3">
+            {pending.map((review) => (
+              <ReviewAdminCard
+                key={review.id}
+                review={review}
+                primaryLabel="Approve"
+                onPrimary={() => updateReview(review.id, "published")}
+                onDelete={() => deleteReview(review.id)}
+              />
+            ))}
+            {pending.length === 0 ? <EmptyState text="No reviews waiting for approval." /> : null}
+          </div>
+        </div>
+        <div>
+          <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-500">Published</h3>
+          <div className="mt-3 grid gap-3">
+            {published.slice(0, 4).map((review) => (
+              <ReviewAdminCard
+                key={review.id}
+                review={review}
+                primaryLabel="Unpublish"
+                onPrimary={() => updateReview(review.id, "pending")}
+                onDelete={() => deleteReview(review.id)}
+              />
+            ))}
+            {published.length === 0 ? <EmptyState text="No published reviews yet." /> : null}
+          </div>
+        </div>
+      </div>
+      {message ? <p className="mt-4 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{message}</p> : null}
+    </Panel>
+  );
+}
+
+function ReviewAdminCard({
+  review,
+  primaryLabel,
+  onPrimary,
+  onDelete,
+}: {
+  review: Review;
+  primaryLabel: string;
+  onPrimary: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <article className="rounded-lg border border-slate-200 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-slate-950">{review.roomName}</p>
+          <p className="mt-1 text-xs font-semibold text-amber-700">{review.rating}/5 stars</p>
+        </div>
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${
+            review.status === "published" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"
+          }`}
+        >
+          {review.status}
+        </span>
+      </div>
+      <p className="mt-3 text-sm font-semibold text-slate-900">{review.title || review.guestName}</p>
+      <p className="mt-1 text-sm leading-6 text-slate-600">{review.body}</p>
+      <p className="mt-3 text-xs text-slate-500">
+        {review.guestName}{review.guestEmail ? ` - ${review.guestEmail}` : ""}
+      </p>
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <button
+          type="button"
+          onClick={onPrimary}
+          className="rounded-full bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800"
+        >
+          {primaryLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+        >
+          Delete
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function CottageManagement({
+  cottages,
+  categories,
+  onUpdate,
+  onCategoriesUpdate,
+  onReload,
+}: {
   cottages: Room[];
+  categories: CottageCategory[];
   onUpdate: React.Dispatch<React.SetStateAction<Room[]>>;
+  onCategoriesUpdate: React.Dispatch<React.SetStateAction<CottageCategory[]>>;
+  onReload: () => Promise<void>;
 }) {
   const [selectedId, setSelectedId] = useState(cottages[0]?.id || "");
   const [newAmenity, setNewAmenity] = useState("");
+  const [newInclude, setNewInclude] = useState("");
+  const [message, setMessage] = useState("");
+  const [categoryDraft, setCategoryDraft] = useState({ name: "", description: "" });
+  const [draftIds, setDraftIds] = useState<Set<string>>(() => new Set());
   const selected = cottages.find((cottage) => cottage.id === selectedId) || cottages[0];
   const amenityOptions = Array.from(
     new Set([...defaultAmenityOptions, ...cottages.flatMap((cottage) => cottage.amenities)]),
   ).sort((a, b) => a.localeCompare(b));
 
   function updateSelected(updates: Partial<Room>) {
+    if (!selected) return;
     onUpdate((current) =>
       current.map((cottage) => (cottage.id === selected.id ? { ...cottage, ...updates } : cottage)),
     );
@@ -1401,6 +1607,142 @@ function CottageManagement({
     });
   }
 
+  function addInclude(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const include = newInclude.trim();
+    if (!include || !selected) return;
+
+    updateSelected({
+      bookingIncludes: Array.from(new Set([...(selected.bookingIncludes || []), include])),
+    });
+    setNewInclude("");
+  }
+
+  function deleteInclude(include: string) {
+    if (!selected) return;
+    updateSelected({
+      bookingIncludes: (selected.bookingIncludes || []).filter((item) => item !== include),
+    });
+  }
+
+  function addCottage() {
+    const category = categories[0] || { id: "cove", name: "Cove cottages", description: "", sortOrder: 0 };
+    const id = `cottage_${category.id}_${Date.now()}`;
+    const nextRoom: Room = {
+      id,
+      slug: id.replace(/_/g, "-"),
+      name: "New cottage",
+      type: category.id,
+      categoryId: category.id,
+      categoryName: category.name,
+      description: "Describe this cottage.",
+      longDescription: "Add full cottage details.",
+      pricePerNight: 0,
+      maxGuests: 1,
+      bedrooms: 1,
+      bathrooms: 1,
+      size: "",
+      image: selected?.image || "",
+      gallery: selected?.gallery || [],
+      amenities: [],
+      bookingIncludes: ["Guest dashboard visibility after sign in"],
+      available: true,
+    };
+
+    onUpdate((current) => [nextRoom, ...current]);
+    setDraftIds((current) => new Set([...current, id]));
+    setSelectedId(id);
+    setMessage("New cottage draft added. Save cottage to make it permanent.");
+  }
+
+  async function saveCottage() {
+    if (!selected) return;
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/admin/rooms", {
+        method: draftIds.has(selected.id) ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(selected),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to save cottage.");
+      setDraftIds((current) => {
+        const next = new Set(current);
+        next.delete(selected.id);
+        return next;
+      });
+      setMessage("Cottage saved.");
+      await onReload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save cottage.");
+    }
+  }
+
+  async function deleteCottage() {
+    if (!selected || !window.confirm(`Delete ${selected.name}?`)) return;
+    const previous = cottages;
+    onUpdate((current) => current.filter((cottage) => cottage.id !== selected.id));
+    setSelectedId(cottages.find((cottage) => cottage.id !== selected.id)?.id || "");
+
+    try {
+      const response = await fetch(`/api/admin/rooms?id=${encodeURIComponent(selected.id)}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to delete cottage.");
+      setMessage("Cottage deleted.");
+    } catch (error) {
+      onUpdate(previous);
+      setMessage(error instanceof Error ? error.message : "Unable to delete cottage.");
+    }
+  }
+
+  async function saveCategory(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = categoryDraft.name.trim();
+    if (!name) return;
+    const nextCategory: CottageCategory = {
+      id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+      name,
+      description: categoryDraft.description.trim(),
+      sortOrder: categories.length * 10 + 10,
+    };
+
+    onCategoriesUpdate((current) => [...current, nextCategory]);
+    setCategoryDraft({ name: "", description: "" });
+
+    try {
+      const response = await fetch("/api/admin/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextCategory),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to save category.");
+      setMessage("Category saved.");
+      await onReload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save category.");
+    }
+  }
+
+  async function deleteCategory(categoryId: string) {
+    if (cottages.some((cottage) => cottage.categoryId === categoryId)) {
+      setMessage("Move or delete cottages in this category first.");
+      return;
+    }
+    if (!window.confirm("Delete this category?")) return;
+
+    onCategoriesUpdate((current) => current.filter((category) => category.id !== categoryId));
+    try {
+      const response = await fetch(`/api/admin/categories?id=${encodeURIComponent(categoryId)}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to delete category.");
+      setMessage("Category deleted.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to delete category.");
+    }
+  }
+
   if (!selected) return null;
 
   return (
@@ -1430,13 +1772,58 @@ function CottageManagement({
             loading="lazy"
             decoding="async"
           />
-          <p className="mt-3 text-sm text-slate-500">
-            Changes are applied to this admin session. Connect Supabase for permanent cottage updates.
-          </p>
+          <div className="mt-4 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={addCottage}
+              className="rounded-full bg-bolihon-green px-4 py-2 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark"
+            >
+              Add cottage
+            </button>
+            <button
+              type="button"
+              onClick={saveCottage}
+              className="rounded-full bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800"
+            >
+              Save cottage
+            </button>
+            <button
+              type="button"
+              onClick={deleteCottage}
+              className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+            >
+              Delete cottage
+            </button>
+          </div>
+          {message ? <p className="mt-3 rounded-md bg-cyan-50 px-3 py-2 text-sm text-cyan-900">{message}</p> : null}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <EditField label="Cottage name" value={selected.name} onChange={(name) => updateSelected({ name })} />
+          <div>
+            <label htmlFor="cottageCategory" className="text-sm font-semibold text-slate-700">
+              Category
+            </label>
+            <select
+              id="cottageCategory"
+              value={selected.categoryId}
+              onChange={(event) => {
+                const category = categories.find((item) => item.id === event.target.value);
+                updateSelected({
+                  type: event.target.value,
+                  categoryId: event.target.value,
+                  categoryName: category?.name || event.target.value,
+                });
+              }}
+              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none ring-cyan-600 focus:ring-2"
+            >
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <EditField
             label="Daily rate"
             type="number"
@@ -1473,6 +1860,36 @@ function CottageManagement({
             />
             Available for booking
           </label>
+          <div className="sm:col-span-2">
+            <div className="mb-3">
+              <p className="text-sm font-semibold text-slate-700">Booking includes</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(selected.bookingIncludes || []).map((include) => (
+                <div key={include} className="flex items-center justify-between gap-3 rounded-md border border-cyan-100 bg-cyan-50 px-3 py-2 text-sm">
+                  <span className="font-medium text-cyan-950">{include}</span>
+                  <button
+                    type="button"
+                    onClick={() => deleteInclude(include)}
+                    className="rounded-full border border-cyan-200 px-2 py-1 text-xs font-semibold text-cyan-800 hover:bg-white"
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+            <form onSubmit={addInclude} className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                value={newInclude}
+                onChange={(event) => setNewInclude(event.target.value)}
+                placeholder="Add booking include"
+                className="min-h-11 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none ring-cyan-600 focus:ring-2"
+              />
+              <button className="rounded-full bg-cyan-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800">
+                Add include
+              </button>
+            </form>
+          </div>
           <div className="sm:col-span-2">
             <div className="mb-3">
               <p className="text-sm font-semibold text-slate-700">Amenities</p>
@@ -1523,6 +1940,42 @@ function CottageManagement({
             </form>
           </div>
         </div>
+      </div>
+      <div className="mt-8 border-t border-slate-200 pt-6">
+        <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-500">Categories</h3>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {categories.map((category) => (
+            <article key={category.id} className="rounded-lg border border-slate-200 p-4">
+              <p className="font-bold text-slate-950">{category.name}</p>
+              <p className="mt-1 text-sm text-slate-500">{category.description || "No description"}</p>
+              <p className="mt-2 text-xs font-semibold text-cyan-800">
+                {cottages.filter((cottage) => cottage.categoryId === category.id).length} cottage(s)
+              </p>
+              <button
+                type="button"
+                onClick={() => deleteCategory(category.id)}
+                className="mt-3 rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
+              >
+                Delete category
+              </button>
+            </article>
+          ))}
+        </div>
+        <form onSubmit={saveCategory} className="mt-4 grid gap-3 rounded-lg bg-slate-50 p-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+          <EditField
+            label="Category name"
+            value={categoryDraft.name}
+            onChange={(name) => setCategoryDraft((current) => ({ ...current, name }))}
+          />
+          <EditField
+            label="Category description"
+            value={categoryDraft.description}
+            onChange={(description) => setCategoryDraft((current) => ({ ...current, description }))}
+          />
+          <button className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark">
+            Add category
+          </button>
+        </form>
       </div>
     </Panel>
   );

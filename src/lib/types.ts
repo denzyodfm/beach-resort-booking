@@ -1,10 +1,19 @@
-export type RoomType = "cove" | "rock" | "rd" | "hall" | "pavillon";
+export type RoomType = string;
+
+export type CottageCategory = {
+  id: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+};
 
 export type Room = {
   id: string;
   slug: string;
   name: string;
   type: RoomType;
+  categoryId: string;
+  categoryName: string;
   description: string;
   longDescription: string;
   pricePerNight: number;
@@ -15,6 +24,7 @@ export type Room = {
   image: string;
   gallery: string[];
   amenities: string[];
+  bookingIncludes: string[];
   featured?: boolean;
   available?: boolean;
 };
@@ -61,4 +71,19 @@ export type PaymentLog = {
   actorRole: string;
   createdAt: string;
   balanceAfter?: number;
+};
+
+export type ReviewStatus = "pending" | "published";
+
+export type Review = {
+  id: string;
+  roomId: string;
+  roomName: string;
+  guestName: string;
+  guestEmail: string;
+  rating: number;
+  title: string;
+  body: string;
+  status: ReviewStatus;
+  createdAt: string;
 };

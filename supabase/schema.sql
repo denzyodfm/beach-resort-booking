@@ -38,13 +38,28 @@ create table public.users (
   updated_at timestamptz not null default now()
 );
 
+create table public.room_categories (
+  id text primary key,
+  name text not null unique,
+  description text,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table public.rooms (
   id text primary key,
   slug text not null unique,
   name text not null,
-  type public.room_type not null,
+  type text not null,
+  category_id text references public.room_categories(id) on delete set null,
   description text not null,
   long_description text,
+  booking_includes text[] not null default array[
+    'Daily breakfast and resort transfers',
+    'Flexible payment status tracking',
+    'Guest dashboard visibility after sign in'
+  ],
   price_per_night numeric(10, 2) not null check (price_per_night > 0),
   max_guests integer not null check (max_guests > 0),
   bedrooms integer not null default 1 check (bedrooms >= 0),
@@ -164,6 +179,8 @@ create table public.reviews (
   user_id uuid references public.users(id) on delete set null,
   room_id text not null references public.rooms(id) on delete cascade,
   booking_id uuid references public.bookings(id) on delete set null,
+  guest_name text,
+  guest_email text,
   rating integer not null check (rating between 1 and 5),
   title text,
   body text not null,
@@ -208,6 +225,8 @@ end;
 $$;
 
 create trigger set_users_updated_at before update on public.users
+  for each row execute function public.set_updated_at();
+create trigger set_room_categories_updated_at before update on public.room_categories
   for each row execute function public.set_updated_at();
 create trigger set_rooms_updated_at before update on public.rooms
   for each row execute function public.set_updated_at();
@@ -294,6 +313,7 @@ as $$
 $$;
 
 alter table public.users enable row level security;
+alter table public.room_categories enable row level security;
 alter table public.rooms enable row level security;
 alter table public.room_images enable row level security;
 alter table public.amenities enable row level security;
@@ -309,6 +329,11 @@ create policy "Guests can read own user profile" on public.users
 create policy "Guests can update own user profile" on public.users
   for update using (auth.uid() = id) with check (auth.uid() = id and role = 'guest');
 create policy "Admins can manage users" on public.users
+  for all using (public.is_admin()) with check (public.is_admin());
+
+create policy "Anyone can read room categories" on public.room_categories
+  for select using (true);
+create policy "Admins can manage room categories" on public.room_categories
   for all using (public.is_admin()) with check (public.is_admin());
 
 create policy "Anyone can read active rooms" on public.rooms
@@ -420,11 +445,23 @@ insert into public.resort_settings (
 )
 on conflict (id) do nothing;
 
+insert into public.room_categories (id, name, description, sort_order) values
+('cove', 'Cove cottages', 'Cove 1 to 45 - Php700/day', 10),
+('rock', 'Rock cottages', 'Rock 1 to 6 - Php800/day', 20),
+('rd', 'RD cottages', 'RD 1 to 8 - Php800/day', 30),
+('hall', 'VGP Hall', 'Event cottage - Php4,500/day', 40),
+('pavillon', 'Pavillon', 'Open-air cottage - Php3,500/day', 50)
+on conflict (id) do update set
+  name = excluded.name,
+  description = excluded.description,
+  sort_order = excluded.sort_order;
+
 insert into public.rooms (
   id,
   slug,
   name,
   type,
+  category_id,
   description,
   long_description,
   price_per_night,
@@ -439,7 +476,8 @@ select
   'cottage_cove_' || n,
   'cove-' || n,
   'Cove ' || n,
-  'cove'::public.room_type,
+  'cove',
+  'cove',
   'Beachside cottage close to the cove path and resort gardens.',
   'A relaxed BOLIHON cottage with air-conditioned sleeping space, private bath, shaded porch, and quick access to the beach path.',
   700,
@@ -455,7 +493,8 @@ select
   'cottage_rock_' || n,
   'rock-' || n,
   'Rock ' || n,
-  'rock'::public.room_type,
+  'rock',
+  'rock',
   'Larger cottage near the rock garden with extra living space.',
   'Rock cottages are designed for families and groups who want more floor area, a quiet porch, and easy access to the scenic rock garden.',
   800,
@@ -471,7 +510,8 @@ select
   'cottage_rd_' || n,
   'rd-' || n,
   'RD ' || n,
-  'rd'::public.room_type,
+  'rd',
+  'rd',
   'Comfortable RD cottage with convenient access to resort facilities.',
   'RD cottages balance privacy and convenience with bright interiors, a private bathroom, and a short walk to dining, reception, and the beach.',
   800,
@@ -487,7 +527,8 @@ select
   'cottage_vgp_hall',
   'vgp-hall',
   'VGP Hall',
-  'hall'::public.room_type,
+  'hall',
+  'hall',
   'Large BOLIHON event cottage for gatherings, meetings, and celebrations.',
   'VGP Hall is a spacious bookable cottage-style venue at BOLIHON with flexible seating, private facilities, and admin-editable rate, details, and image controls.',
   4500,
@@ -502,7 +543,8 @@ select
   'cottage_pavillon',
   'pavillon',
   'Pavillon',
-  'pavillon'::public.room_type,
+  'pavillon',
+  'pavillon',
   'Open-air BOLIHON pavillon cottage for casual events and family stays.',
   'The Pavillon is a breezy bookable cottage-style space with shaded gathering areas, nearby resort facilities, and editable admin details.',
   3500,

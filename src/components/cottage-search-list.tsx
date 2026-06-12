@@ -3,38 +3,29 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { RoomCard } from "@/components/room-card";
-import type { Room } from "@/lib/types";
+import type { CottageCategory, Room } from "@/lib/types";
 
 type CottageType = Room["type"];
 
-const categoryCards: { type: CottageType; label: string; rate: string }[] = [
-  { type: "cove", label: "Cove 1-45", rate: "Php700/day" },
-  { type: "rock", label: "Rock 1-6", rate: "Php800/day" },
-  { type: "rd", label: "RD 1-8", rate: "Php800/day" },
-  { type: "hall", label: "VGP Hall", rate: "Php4,500/day" },
-  { type: "pavillon", label: "Pavillon", rate: "Php3,500/day" },
-];
-
-const groupLabels = {
-  cove: "Cove cottages",
-  rock: "Rock cottages",
-  rd: "RD cottages",
-  hall: "VGP Hall",
-  pavillon: "Pavillon",
-};
-
-const groupDescriptions = {
-  cove: "Cove 1 to 45 - Php700/day",
-  rock: "Rock 1 to 6 - Php800/day",
-  rd: "RD 1 to 8 - Php800/day",
-  hall: "Event cottage - Php4,500/day",
-  pavillon: "Open-air cottage - Php3,500/day",
-};
-
-export function CottageSearchList({ rooms }: { rooms: Room[] }) {
+export function CottageSearchList({ rooms, categories }: { rooms: Room[]; categories: CottageCategory[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const categoryParam = searchParams.get("category");
+  const categoryCards = useMemo(
+    () =>
+      categories.map((category) => {
+        const categoryRooms = rooms.filter((room) => room.categoryId === category.id);
+        const lowestRate = Math.min(...categoryRooms.map((room) => room.pricePerNight).filter(Number.isFinite));
+
+        return {
+          type: category.id,
+          label: category.name,
+          description: category.description,
+          rate: Number.isFinite(lowestRate) ? `From Php${lowestRate.toLocaleString()}/day` : "No cottages yet",
+        };
+      }),
+    [categories, rooms],
+  );
   const selectedCategory = categoryCards.some((category) => category.type === categoryParam)
     ? (categoryParam as CottageType)
     : null;
@@ -44,7 +35,7 @@ export function CottageSearchList({ rooms }: { rooms: Room[] }) {
   const filteredRooms = useMemo(() => {
     const normalized = submittedQuery.trim().toLowerCase();
     const categoryRooms = selectedCategory
-      ? rooms.filter((room) => room.type === selectedCategory)
+      ? rooms.filter((room) => room.categoryId === selectedCategory)
       : rooms;
 
     if (!normalized) return categoryRooms;
@@ -59,13 +50,15 @@ export function CottageSearchList({ rooms }: { rooms: Room[] }) {
 
   const groupedRooms = useMemo(
     () =>
-      (["cove", "rock", "rd", "hall", "pavillon"] as const)
-        .map((type) => ({
-          type,
-          rooms: filteredRooms.filter((room) => room.type === type),
+      categories
+        .map((category) => ({
+          type: category.id,
+          label: category.name,
+          description: category.description,
+          rooms: filteredRooms.filter((room) => room.categoryId === category.id),
         }))
         .filter((group) => group.rooms.length > 0),
-    [filteredRooms],
+    [categories, filteredRooms],
   );
 
   function search(event: React.FormEvent<HTMLFormElement>) {
@@ -146,7 +139,7 @@ export function CottageSearchList({ rooms }: { rooms: Room[] }) {
       <div className="mt-6 flex items-center justify-between text-sm text-slate-600">
         <p>
           Showing {filteredRooms.length} of {rooms.length} cottages
-          {selectedCategory ? ` in ${groupLabels[selectedCategory]}` : ""}
+          {selectedCategory ? ` in ${categoryCards.find((category) => category.type === selectedCategory)?.label || selectedCategory}` : ""}
         </p>
         <div className="flex items-center gap-3">
           {submittedQuery ? <p>Search: &ldquo;{submittedQuery}&rdquo;</p> : null}
@@ -167,9 +160,9 @@ export function CottageSearchList({ rooms }: { rooms: Room[] }) {
           <section key={group.type}>
             <div className="mb-4 flex flex-col justify-between gap-2 border-b border-slate-200 pb-3 sm:flex-row sm:items-end">
               <div>
-                <h2 className="text-2xl font-bold text-slate-950">{groupLabels[group.type]}</h2>
+                <h2 className="text-2xl font-bold text-slate-950">{group.label}</h2>
                 <p className="mt-1 text-sm font-semibold text-bolihon-green">
-                  {groupDescriptions[group.type]}
+                  {group.description || `${group.rooms.length} cottage listing${group.rooms.length === 1 ? "" : "s"}`}
                 </p>
               </div>
               <p className="text-sm text-slate-500">{group.rooms.length} available listing{group.rooms.length === 1 ? "" : "s"}</p>

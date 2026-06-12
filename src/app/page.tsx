@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CottageCarousel } from "@/components/cottage-carousel";
-import { rooms } from "@/lib/resort-data";
+import { getRoomCatalog } from "@/lib/rooms-server";
 import type { Room } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,8 @@ function getRandomCottages(cottages: Room[], count: number) {
     .slice(0, Math.min(count, cottages.length));
 }
 
-export default function Home() {
+export default async function Home() {
+  const { rooms } = await getRoomCatalog();
   const randomCottages = getRandomCottages(rooms, 8);
 
   return (

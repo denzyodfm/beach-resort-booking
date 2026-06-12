@@ -4,6 +4,7 @@ import {
   updateServerDemoBooking,
 } from "@/lib/demo-booking-store";
 import { getRoomById } from "@/lib/resort-data";
+import { getRoomCatalog } from "@/lib/rooms-server";
 import {
   buildBookingConfirmationMessage,
   calculateTotal,
@@ -39,7 +40,8 @@ export async function POST(request: Request) {
     totalPrice: number;
   };
 
-  const room = getRoomById(body.roomId);
+  const catalog = await getRoomCatalog();
+  const room = catalog.rooms.find((item) => item.id === body.roomId) || getRoomById(body.roomId);
   const { nights, subtotal, total } = room
     ? calculateTotal(room.pricePerNight, body.checkIn, body.checkOut)
     : { nights: 0, subtotal: 0, total: 0 };

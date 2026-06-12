@@ -7,6 +7,7 @@ import { useDemoAuth } from "@/lib/demo-auth";
 const navItems = [
   { href: "/rooms", label: "Cottages" },
   { href: "/booking", label: "Book" },
+  { href: "/reviews", label: "Reviews" },
   { href: "/dashboard", label: "Dashboard" },
   { href: "/admin", label: "Admin" },
 ];
