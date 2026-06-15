@@ -1,26 +1,22 @@
 import Link from "next/link";
 import { CottageCarousel } from "@/components/cottage-carousel";
+import { getPublishedReviews } from "@/lib/reviews-server";
 import { getRoomCatalog } from "@/lib/rooms-server";
-import type { Room } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 const amenities = ["Lagoon pool", "Beach club", "Spa pavilion", "Sunset dining", "Water sports", "Airport transfers"];
-const testimonials = [
-  ["A resort app that feels as polished as the stay itself.", "Elena R."],
-  ["The cottage booking flow was fast, clear, and gorgeous on mobile.", "Sam K."],
-  ["Admin controls are simple enough for daily operations.", "Priya M."],
-];
 
-function getRandomCottages(cottages: Room[], count: number) {
-  return [...cottages]
+function getRandomItems<T>(items: T[], count: number) {
+  return [...items]
     .sort(() => Math.random() - 0.5)
-    .slice(0, Math.min(count, cottages.length));
+    .slice(0, Math.min(count, items.length));
 }
 
 export default async function Home() {
-  const { rooms } = await getRoomCatalog();
-  const randomCottages = getRandomCottages(rooms, 8);
+  const [{ rooms }, reviews] = await Promise.all([getRoomCatalog(), getPublishedReviews()]);
+  const randomCottages = getRandomItems(rooms, 8);
+  const randomReviews = getRandomItems(reviews, 3);
 
   return (
     <>
@@ -50,12 +46,26 @@ export default async function Home() {
           ))}
         </div>
         <div className="grid gap-4 md:grid-cols-3">
-          {testimonials.map(([quote, name]) => (
-            <figure key={name} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-              <blockquote className="text-lg font-semibold leading-7 text-slate-950">&ldquo;{quote}&rdquo;</blockquote>
-              <figcaption className="mt-4 text-sm text-slate-600">{name}</figcaption>
+          {randomReviews.map((review) => (
+            <figure key={review.id} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm font-bold text-cyan-800">{review.roomName}</p>
+                <span className="rounded-full bg-amber-50 px-3 py-1 text-sm font-bold text-amber-800">
+                  {review.rating}/5
+                </span>
+              </div>
+              <blockquote className="text-lg font-semibold leading-7 text-slate-950">
+                &ldquo;{review.title || review.body}&rdquo;
+              </blockquote>
+              {review.title ? <p className="mt-3 text-sm leading-6 text-slate-600">{review.body}</p> : null}
+              <figcaption className="mt-4 text-sm text-slate-600">{review.guestName}</figcaption>
             </figure>
           ))}
+          {randomReviews.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500 md:col-span-3">
+              No approved reviews yet.
+            </div>
+          ) : null}
         </div>
       </section>
 
