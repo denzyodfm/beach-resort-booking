@@ -7,6 +7,7 @@ import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
 const publicNavItems = [
   { href: "/rooms", label: "Cottages" },
   { href: "/booking", label: "Book" },
+  { href: "/booking-by-date", label: "Book by date" },
   { href: "/reviews", label: "Reviews" },
 ];
 

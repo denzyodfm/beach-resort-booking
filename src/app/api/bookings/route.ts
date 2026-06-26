@@ -11,6 +11,7 @@ import {
   canGuestCancel,
 } from "@/lib/booking-logic";
 import { sendBookingConfirmationEmail } from "@/lib/email";
+import { sendBookingConfirmationSms } from "@/lib/sms";
 
 export async function GET() {
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -107,6 +108,15 @@ export async function POST(request: Request) {
     checkOut: body.checkOut,
     totalAmount: total,
   });
+  const sms = await sendBookingConfirmationSms({
+    to: body.guestPhone,
+    guestName: body.guestName,
+    bookingId: data.booking_number || data.id,
+    cottageName: room.name,
+    checkIn: body.checkIn,
+    checkOut: body.checkOut,
+    totalAmount: total,
+  });
 
   return Response.json(
     {
@@ -120,7 +130,9 @@ export async function POST(request: Request) {
         checkIn: body.checkIn,
         checkOut: body.checkOut,
         totalPrice: total,
-      })} ${email.sent ? `Confirmation email sent to ${body.guestEmail}.` : email.reason}`,
+      })} ${email.sent ? `Confirmation email sent to ${body.guestEmail}.` : email.reason} ${
+        sms.sent ? `Confirmation SMS sent to ${body.guestPhone}.` : sms.reason
+      }`,
     },
     { status: 201 },
   );

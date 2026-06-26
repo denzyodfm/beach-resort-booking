@@ -19,7 +19,7 @@ export async function sendBookingConfirmationEmail(payload: BookingEmailPayload)
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.BOOKING_FROM_EMAIL;
 
-  if (!apiKey || !from) {
+  if (!hasRealEmailConfig(apiKey, from)) {
     return {
       sent: false,
       reason: "No real email was sent because email is not configured. Add RESEND_API_KEY and BOOKING_FROM_EMAIL to enable confirmation emails.",
@@ -58,4 +58,9 @@ export async function sendBookingConfirmationEmail(payload: BookingEmailPayload)
   }
 
   return { sent: true };
+}
+
+function hasRealEmailConfig(apiKey: string | undefined, from: string | undefined) {
+  if (!apiKey || !from) return false;
+  return !apiKey.includes("your-") && !from.includes("your-domain.com");
 }
