@@ -3,6 +3,8 @@ import { hasSupabaseEnv, createAdminClient } from "@/lib/supabase-server";
 import { getServerDemoBookings } from "@/lib/demo-booking-store";
 import { getRoomById, nightsBetween } from "@/lib/resort-data";
 import { findBookingConflict, getUnavailableRanges } from "@/lib/booking-logic";
+import { findBlockedBookingDate } from "@/lib/booking-blocked-dates";
+import { getBookingBlockedDates } from "@/lib/booking-blocked-dates-server";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -13,6 +15,15 @@ export async function GET(request: NextRequest) {
 
   if (!room || !checkIn || !checkOut || nightsBetween(checkIn, checkOut) < 1) {
     return Response.json({ available: false, message: "Choose a cottage and valid dates." }, { status: 400 });
+  }
+
+  const blockedDate = findBlockedBookingDate(checkIn, checkOut, await getBookingBlockedDates());
+  if (blockedDate.blocked) {
+    return Response.json({
+      available: false,
+      unavailableRanges: [],
+      message: blockedDate.reason,
+    });
   }
 
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {

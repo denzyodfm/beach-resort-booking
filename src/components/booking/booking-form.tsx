@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { findBlockedBookingDate, type BookingBlockedDate } from "@/lib/booking-blocked-dates";
 import { findBookingConflict, getUnavailableRanges } from "@/lib/booking-logic";
 import { saveDemoBooking } from "@/lib/demo-bookings";
 import { getDemoBookings } from "@/lib/demo-bookings";
@@ -67,6 +68,7 @@ export function BookingForm({
   const [availability, setAvailability] = useState<AvailabilityState>("idle");
   const [message, setMessage] = useState("");
   const [unavailableRanges, setUnavailableRanges] = useState<UnavailableRange[]>([]);
+  const [blockedDates, setBlockedDates] = useState<BookingBlockedDate[]>([]);
   const supabaseConfigured = hasSupabaseEnv();
 
   const selectedRoom = filteredRooms.find((room) => room.id === roomId) || filteredRooms[0] || rooms[0];
@@ -74,6 +76,7 @@ export function BookingForm({
   const normalizedCheckOut = normalizeBookingDate(checkOut);
   const datesAreValid = Boolean(normalizedCheckIn && normalizedCheckOut);
   const nights = datesAreValid ? nightsBetween(normalizedCheckIn, normalizedCheckOut) : 0;
+  const blockedDate = datesAreValid ? findBlockedBookingDate(normalizedCheckIn, normalizedCheckOut, blockedDates) : { blocked: false, reason: "" };
   const total = useMemo(
     () => (selectedRoom ? selectedRoom.pricePerNight * nights : 0),
     [nights, selectedRoom],
@@ -107,6 +110,12 @@ export function BookingForm({
     if (!datesAreValid || nights < 1) {
       setAvailability("unavailable");
       setMessage("Please select valid check-in and check-out dates.");
+      return false;
+    }
+
+    if (blockedDate.blocked) {
+      setAvailability("unavailable");
+      setMessage(blockedDate.reason);
       return false;
     }
 
@@ -202,6 +211,23 @@ export function BookingForm({
     };
   }, [roomId, normalizedCheckIn, normalizedCheckOut, datesAreValid, mergeUnavailableRanges]);
 
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/booking-blocked-dates")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((dates: BookingBlockedDate[]) => {
+        if (active) setBlockedDates(dates);
+      })
+      .catch(() => {
+        if (active) setBlockedDates([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <form onSubmit={submitBooking} className="grid gap-5 rounded-lg border border-slate-200 bg-white p-5 shadow-xl shadow-cyan-950/10">
       <div>
@@ -271,6 +297,12 @@ export function BookingForm({
           }}
         />
       </div>
+
+      {blockedDate.blocked ? (
+        <p className="rounded-md bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+          {blockedDate.reason}
+        </p>
+      ) : null}
 
       <div className="rounded-md border border-cyan-100 bg-cyan-50 p-4">
         <p className="text-sm font-semibold text-cyan-950">Booking includes</p>
@@ -343,7 +375,7 @@ export function BookingForm({
         </button>
         <button
           type="submit"
-          disabled={!datesAreValid || nights < 1 || guests > (selectedRoom?.maxGuests || 0) || availability === "unavailable" || !guestPhone.trim()}
+          disabled={!datesAreValid || nights < 1 || blockedDate.blocked || guests > (selectedRoom?.maxGuests || 0) || availability === "unavailable" || !guestPhone.trim()}
           className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           Hold as pending booking

@@ -149,6 +149,14 @@ create table public.bookings (
   )
 );
 
+create table public.booking_blackout_dates (
+  id uuid primary key default gen_random_uuid(),
+  blocked_date date not null unique,
+  label text not null default 'Philippine holiday',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 -- Room availability guard: active pending/confirmed stays for the same room cannot overlap.
 alter table public.bookings
   add constraint no_overlapping_active_bookings
@@ -210,6 +218,7 @@ create index room_images_room_sort_idx on public.room_images (room_id, sort_orde
 create index bookings_user_idx on public.bookings (user_id);
 create index bookings_room_dates_idx on public.bookings (room_id, check_in, check_out);
 create index bookings_status_idx on public.bookings (status, payment_status);
+create index booking_blackout_dates_date_idx on public.booking_blackout_dates (blocked_date);
 create index payments_booking_idx on public.payments (booking_id);
 create index reviews_room_published_idx on public.reviews (room_id, is_published);
 create index promos_code_active_idx on public.promos (code, is_active);
@@ -233,6 +242,8 @@ create trigger set_rooms_updated_at before update on public.rooms
 create trigger set_promos_updated_at before update on public.promos
   for each row execute function public.set_updated_at();
 create trigger set_bookings_updated_at before update on public.bookings
+  for each row execute function public.set_updated_at();
+create trigger set_booking_blackout_dates_updated_at before update on public.booking_blackout_dates
   for each row execute function public.set_updated_at();
 create trigger set_payments_updated_at before update on public.payments
   for each row execute function public.set_updated_at();
@@ -320,6 +331,7 @@ alter table public.amenities enable row level security;
 alter table public.room_amenities enable row level security;
 alter table public.promos enable row level security;
 alter table public.bookings enable row level security;
+alter table public.booking_blackout_dates enable row level security;
 alter table public.payments enable row level security;
 alter table public.reviews enable row level security;
 alter table public.resort_settings enable row level security;
@@ -393,6 +405,11 @@ create policy "Guests can cancel own pending bookings" on public.bookings
     and cancelled_at is not null
   );
 create policy "Admins can manage bookings" on public.bookings
+  for all using (public.is_admin()) with check (public.is_admin());
+
+create policy "Anyone can read booking blackout dates" on public.booking_blackout_dates
+  for select using (true);
+create policy "Admins can manage booking blackout dates" on public.booking_blackout_dates
   for all using (public.is_admin()) with check (public.is_admin());
 
 create policy "Guests can read payments for own bookings" on public.payments

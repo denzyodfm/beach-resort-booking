@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { findBlockedBookingDate, type BookingBlockedDate } from "@/lib/booking-blocked-dates";
 import { findBookingConflict } from "@/lib/booking-logic";
 import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
 import { getDemoBookings, saveDemoBooking } from "@/lib/demo-bookings";
@@ -61,6 +62,7 @@ export function DateCottageBooking({
   const [date, setDate] = useState(today);
   const [selectedCategoryId, setSelectedCategoryId] = useState(categoryOptions[0]?.id || "");
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [blockedDates, setBlockedDates] = useState<BookingBlockedDate[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [form, setForm] = useState<FormState>({
     guestName: user?.name || "",
@@ -108,8 +110,26 @@ export function DateCottageBooking({
     };
   }, [isManager, supabaseConfigured]);
 
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/booking-blocked-dates")
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((dates: BookingBlockedDate[]) => {
+        if (active) setBlockedDates(dates);
+      })
+      .catch(() => {
+        if (active) setBlockedDates([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId);
   const total = selectedRoom ? selectedRoom.pricePerNight * nightsBetween(date, date) : 0;
+  const blockedDate = findBlockedBookingDate(date, date, blockedDates);
   const selectedCategory = categoryOptions.find((category) => category.id === selectedCategoryId) || categoryOptions[0];
   const visibleRooms = useMemo(
     () => rooms.filter((room) => room.categoryId === (selectedCategory?.id || "")),
@@ -135,6 +155,12 @@ export function DateCottageBooking({
   }
 
   function selectRoom(room: Room) {
+    if (blockedDate.blocked) {
+      setSelectedRoomId("");
+      setMessage(blockedDate.reason);
+      return;
+    }
+
     if (room.available === false || getDateBooking(room.id)) return;
     setSelectedRoomId(room.id);
     setMessage("");
@@ -153,6 +179,11 @@ export function DateCottageBooking({
   async function submitBooking(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedRoom) return;
+
+    if (blockedDate.blocked) {
+      setMessage(blockedDate.reason);
+      return;
+    }
 
     const conflict = getDateBooking(selectedRoom.id);
     if (conflict) {
@@ -246,6 +277,11 @@ export function DateCottageBooking({
               {activeBookings.filter((booking) => findBookingConflict([booking], booking.roomId, date, date)).length} cottage booking(s) found for this date.
             </p>
           </div>
+          {blockedDate.blocked ? (
+            <p className="mt-3 rounded-md bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+              {blockedDate.reason}
+            </p>
+          ) : null}
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -292,12 +328,12 @@ export function DateCottageBooking({
                   <button
                     key={room.id}
                     type="button"
-                    disabled={disabled}
+                    disabled={blockedDate.blocked || disabled}
                     onClick={() => selectRoom(room)}
                     className={`min-h-40 rounded-lg border p-4 text-left shadow-sm transition ${
                       selected
                         ? "border-bolihon-green bg-lime-50 ring-2 ring-bolihon-green/30"
-                        : disabled
+                        : blockedDate.blocked || disabled
                           ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500"
                           : "border-slate-200 bg-white hover:border-bolihon-green hover:shadow-md"
                     }`}
@@ -318,7 +354,7 @@ export function DateCottageBooking({
                               : "bg-emerald-50 text-emerald-800"
                         }`}
                       >
-                        {room.available === false ? "Offline" : booking ? "Booked" : "Open"}
+                        {blockedDate.blocked ? "Blocked" : room.available === false ? "Offline" : booking ? "Booked" : "Open"}
                       </span>
                     </div>
                     <p className="mt-4 line-clamp-2 text-sm text-slate-600">{room.description}</p>
@@ -387,7 +423,7 @@ export function DateCottageBooking({
             </div>
             <button
               type="submit"
-              disabled={submitting || form.guests < 1 || form.guests > selectedRoom.maxGuests || !form.guestPhone.trim()}
+              disabled={submitting || blockedDate.blocked || form.guests < 1 || form.guests > selectedRoom.maxGuests || !form.guestPhone.trim()}
               className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {submitting ? "Holding..." : "Hold this cottage"}

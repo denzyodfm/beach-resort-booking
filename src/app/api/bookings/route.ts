@@ -10,6 +10,8 @@ import {
   calculateTotal,
   canGuestCancel,
 } from "@/lib/booking-logic";
+import { findBlockedBookingDate } from "@/lib/booking-blocked-dates";
+import { getBookingBlockedDates } from "@/lib/booking-blocked-dates-server";
 import { sendBookingConfirmationEmail } from "@/lib/email";
 import { sendBookingConfirmationSms } from "@/lib/sms";
 
@@ -53,6 +55,11 @@ export async function POST(request: Request) {
 
   if (!body.guestPhone?.trim()) {
     return Response.json({ message: "Cellphone number is required for booking confirmation." }, { status: 400 });
+  }
+
+  const blockedDate = findBlockedBookingDate(body.checkIn, body.checkOut, await getBookingBlockedDates());
+  if (blockedDate.blocked) {
+    return Response.json({ message: blockedDate.reason }, { status: 409 });
   }
 
   if (body.totalPrice !== total) {

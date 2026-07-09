@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isPaidEnoughToConfirm } from "@/lib/booking-logic";
+import type { BookingBlockedDate } from "@/lib/booking-blocked-dates";
 import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
 import { useDemoAuth } from "@/lib/demo-auth";
 import { nightsBetween, rooms, sampleBookings } from "@/lib/resort-data";
@@ -393,6 +394,8 @@ export function AdminDashboard() {
 
       {user?.role === "admin" ? <UserAdministration /> : null}
 
+      <HolidayDateManagement />
+
       <section className="grid gap-6">
         <CalendarView bookings={bookings} />
       </section>
@@ -700,6 +703,134 @@ function UserAdministration() {
             ))}
             {loading ? <EmptyState text="Loading users..." /> : null}
             {!loading && users.length === 0 ? <EmptyState text="No users found." /> : null}
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function HolidayDateManagement() {
+  const [dates, setDates] = useState<BookingBlockedDate[]>([]);
+  const [form, setForm] = useState({ date: "", label: "Philippine holiday" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    void loadDates();
+  }, []);
+
+  async function loadDates() {
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/admin/booking-blocked-dates");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to load holiday dates.");
+      setDates(data);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to load holiday dates.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function saveDate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.date) return;
+
+    setSaving(true);
+    setMessage("");
+
+    try {
+      const response = await fetch("/api/admin/booking-blocked-dates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to save holiday date.");
+      setDates((current) => [data, ...current.filter((item) => item.date !== data.date)].sort((a, b) => a.date.localeCompare(b.date)));
+      setForm({ date: "", label: "Philippine holiday" });
+      setMessage("Holiday date saved. Bookings are disabled for this date.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to save holiday date.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteDate(date: BookingBlockedDate) {
+    if (!window.confirm(`Allow bookings again on ${date.date}?`)) return;
+
+    setMessage("");
+    setDates((current) => current.filter((item) => item.id !== date.id));
+
+    try {
+      const response = await fetch(`/api/admin/booking-blocked-dates?id=${encodeURIComponent(date.id)}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to delete holiday date.");
+      setMessage("Holiday date removed.");
+    } catch (error) {
+      setDates((current) => [...current, date].sort((a, b) => a.date.localeCompare(b.date)));
+      setMessage(error instanceof Error ? error.message : "Unable to delete holiday date.");
+    }
+  }
+
+  return (
+    <Panel title="No-booking dates" eyebrow="Booking rules">
+      <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
+        <form onSubmit={saveDate} className="grid gap-4 rounded-lg bg-slate-50 p-4">
+          <div>
+            <h3 className="font-bold text-slate-950">Philippine holiday</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Saturdays and Sundays are blocked automatically. Add Philippine holidays here to block them too.
+            </p>
+          </div>
+          <EditField label="Holiday date" type="date" value={form.date} onChange={(date) => setForm((current) => ({ ...current, date }))} />
+          <EditField label="Holiday name" value={form.label} onChange={(label) => setForm((current) => ({ ...current, label }))} />
+          <button
+            disabled={saving || !form.date}
+            className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            {saving ? "Saving..." : "Add no-booking date"}
+          </button>
+          {message ? <p className="rounded-md bg-cyan-50 px-3 py-2 text-sm text-cyan-900">{message}</p> : null}
+        </form>
+
+        <div>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-slate-700">Blocked holiday dates</p>
+            <button
+              type="button"
+              onClick={() => void loadDates()}
+              className="rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Refresh
+            </button>
+          </div>
+          <div className="grid gap-2">
+            {dates.map((date) => (
+              <article key={date.id} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-bold text-slate-950">{date.date}</p>
+                  <p className="text-sm text-slate-500">{date.label}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void deleteDate(date)}
+                  className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+                >
+                  Delete
+                </button>
+              </article>
+            ))}
+            {loading ? <EmptyState text="Loading holiday dates..." /> : null}
+            {!loading && dates.length === 0 ? <EmptyState text="No holiday dates added yet." /> : null}
           </div>
         </div>
       </div>
