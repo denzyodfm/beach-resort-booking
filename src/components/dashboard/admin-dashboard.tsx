@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isPaidEnoughToConfirm } from "@/lib/booking-logic";
+import { AutoReplyKnowledgeManager } from "@/components/dashboard/auto-reply-knowledge-manager";
 import type { BookingBlockedDate } from "@/lib/booking-blocked-dates";
 import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
 import { useDemoAuth } from "@/lib/demo-auth";
@@ -393,6 +394,8 @@ export function AdminDashboard() {
       </section>
 
       {user?.role === "admin" ? <UserAdministration /> : null}
+
+      {user?.role === "admin" ? <AutoReplyKnowledgeManager /> : null}
 
       <HolidayDateManagement />
 

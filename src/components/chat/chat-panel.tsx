@@ -5,6 +5,7 @@ import {
   addMessage,
   getConversations,
   getOrCreateConversation,
+  refreshAutoReplyKnowledge,
   type ChatConversation,
 } from "@/lib/demo-chat";
 import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
@@ -52,6 +53,8 @@ export function ChatPanel() {
   }, [guest, user]);
 
   useEffect(() => {
+    void refreshAutoReplyKnowledge();
+
     function sync() {
       if (canManageResort(user?.role)) {
         const all = getConversations().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

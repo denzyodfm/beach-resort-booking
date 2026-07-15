@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  defaultAutoReplyKnowledge,
+  findKnowledgeMatch,
+  normalizeKnowledgeItem,
+  type AutoReplyKnowledgeItem,
+} from "@/lib/auto-reply-knowledge";
+
 export type ChatMessage = {
   id: string;
   conversationId: string;
@@ -19,7 +26,9 @@ export type ChatConversation = {
 };
 
 const storageKey = "bolihon-demo-chats";
+const knowledgeStorageKey = "bolihon-auto-reply-knowledge";
 let memoryConversations: ChatConversation[] = [];
+let memoryKnowledge: AutoReplyKnowledgeItem[] = [...defaultAutoReplyKnowledge];
 
 const autoReplySender = {
   role: "staff" as const,
@@ -48,6 +57,32 @@ export function getChatStats() {
     today: guestMessages.filter((message) => message.createdAt.slice(0, 10) === today).length,
     total: guestMessages.length,
   };
+}
+
+export function getCachedAutoReplyKnowledge() {
+  if (typeof window === "undefined") return memoryKnowledge;
+
+  try {
+    const stored = window.localStorage.getItem(knowledgeStorageKey);
+    memoryKnowledge = stored ? (JSON.parse(stored) as AutoReplyKnowledgeItem[]).map(normalizeKnowledgeItem) : memoryKnowledge;
+    return memoryKnowledge;
+  } catch {
+    return memoryKnowledge;
+  }
+}
+
+export async function refreshAutoReplyKnowledge() {
+  try {
+    const response = await fetch("/api/auto-reply-knowledge", { cache: "no-store" });
+    const data = (await response.json()) as { items?: AutoReplyKnowledgeItem[] };
+    if (!response.ok || !Array.isArray(data.items)) return getCachedAutoReplyKnowledge();
+
+    memoryKnowledge = data.items.map(normalizeKnowledgeItem);
+    saveAutoReplyKnowledge(memoryKnowledge);
+    return memoryKnowledge;
+  } catch {
+    return getCachedAutoReplyKnowledge();
+  }
 }
 
 export function getOrCreateConversation(guest: {
@@ -121,34 +156,12 @@ function createMessageId() {
 }
 
 function buildAutomatedReply(message: string, conversation: ChatConversation) {
-  const text = message.toLowerCase();
   const greeting = `Hi ${conversation.guestName || "there"}, thanks for messaging BOLIHON Cove.`;
+  const match = findKnowledgeMatch(message, getCachedAutoReplyKnowledge());
 
-  if (matchesAny(text, ["available", "availability", "vacant", "date", "book", "reserve", "reservation"])) {
-    return `${greeting} For availability, please choose your cottage and dates on the booking page so we can check the calendar right away. If you already sent your dates, admin will review this chat and confirm the next step.`;
-  }
-
-  if (matchesAny(text, ["rate", "rates", "price", "cost", "how much", "fee"])) {
-    return `${greeting} Current daily rates start at Php700 for Cove cottages, Php800 for Rock and RD cottages, Php4,500 for VGP Hall, and Php3,500 for the Pavillon. Final totals depend on cottage and dates.`;
-  }
-
-  if (matchesAny(text, ["pay", "payment", "deposit", "gcash", "paid", "proof", "receipt"])) {
-    return `${greeting} Please keep your payment proof ready. Admin will verify the payment status and update your booking once the proof has been checked.`;
-  }
-
-  if (matchesAny(text, ["cancel", "refund", "reschedule", "move", "change date"])) {
-    return `${greeting} For cancellations or date changes, please include your booking ID, contact number, and preferred new date if rescheduling. Admin will check the policy and availability.`;
-  }
-
-  if (matchesAny(text, ["where", "location", "address", "directions", "map"])) {
-    return `${greeting} Please send your preferred travel date and contact number here. Admin can share the latest directions and arrival details for your visit.`;
-  }
+  if (match) return `${greeting} ${match.response}`;
 
   return `${greeting} We received your inquiry and an admin will follow up here. For faster help, please include your preferred cottage, dates, number of guests, and contact number.`;
-}
-
-function matchesAny(text: string, keywords: string[]) {
-  return keywords.some((keyword) => text.includes(keyword));
 }
 
 function saveConversations(conversations: ChatConversation[]) {
@@ -161,4 +174,14 @@ function saveConversations(conversations: ChatConversation[]) {
   }
 
   window.dispatchEvent(new Event("bolihon-chat-updated"));
+}
+
+function saveAutoReplyKnowledge(items: AutoReplyKnowledgeItem[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(knowledgeStorageKey, JSON.stringify(items));
+  } catch {
+    // Auto-replies can still use the in-memory knowledge for this page session.
+  }
 }

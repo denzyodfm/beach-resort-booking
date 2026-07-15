@@ -8,6 +8,7 @@ import {
   getChatStats,
   getConversations,
   getOrCreateConversation,
+  refreshAutoReplyKnowledge,
 } from "@/lib/demo-chat";
 import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
 
@@ -67,6 +68,8 @@ export function FloatingChat() {
     : null;
 
   useEffect(() => {
+    void refreshAutoReplyKnowledge();
+
     function sync() {
       setChatVersion((current) => current + 1);
     }

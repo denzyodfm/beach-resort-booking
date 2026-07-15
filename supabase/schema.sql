@@ -213,6 +213,16 @@ create table public.resort_settings (
   constraint one_resort_settings_row check (id)
 );
 
+create table public.auto_reply_knowledge (
+  id text primary key,
+  title text not null,
+  keywords text[] not null default '{}',
+  response text not null,
+  sort_order integer not null default 100,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index rooms_active_featured_idx on public.rooms (is_active, is_featured, sort_order);
 create index room_images_room_sort_idx on public.room_images (room_id, sort_order);
 create index bookings_user_idx on public.bookings (user_id);
@@ -222,6 +232,7 @@ create index booking_blackout_dates_date_idx on public.booking_blackout_dates (b
 create index payments_booking_idx on public.payments (booking_id);
 create index reviews_room_published_idx on public.reviews (room_id, is_published);
 create index promos_code_active_idx on public.promos (code, is_active);
+create index auto_reply_knowledge_sort_idx on public.auto_reply_knowledge (sort_order, created_at);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -248,6 +259,8 @@ create trigger set_booking_blackout_dates_updated_at before update on public.boo
 create trigger set_payments_updated_at before update on public.payments
   for each row execute function public.set_updated_at();
 create trigger set_reviews_updated_at before update on public.reviews
+  for each row execute function public.set_updated_at();
+create trigger set_auto_reply_knowledge_updated_at before update on public.auto_reply_knowledge
   for each row execute function public.set_updated_at();
 
 create or replace function public.handle_new_user()
@@ -335,6 +348,7 @@ alter table public.booking_blackout_dates enable row level security;
 alter table public.payments enable row level security;
 alter table public.reviews enable row level security;
 alter table public.resort_settings enable row level security;
+alter table public.auto_reply_knowledge enable row level security;
 
 create policy "Guests can read own user profile" on public.users
   for select using (auth.uid() = id or public.is_admin());
@@ -449,6 +463,11 @@ create policy "Anyone can read resort settings" on public.resort_settings
 create policy "Admins can manage resort settings" on public.resort_settings
   for all using (public.is_admin()) with check (public.is_admin());
 
+create policy "Anyone can read auto-reply knowledge" on public.auto_reply_knowledge
+  for select using (true);
+create policy "Admins can manage auto-reply knowledge" on public.auto_reply_knowledge
+  for all using (public.is_admin()) with check (public.is_admin());
+
 insert into public.resort_settings (
   contact_email,
   contact_phone,
@@ -460,6 +479,45 @@ insert into public.resort_settings (
   'BOLIHON Beach Resort',
   'Free cancellation until 7 days before check-in. One-day deposit retained after that window.'
 )
+on conflict (id) do nothing;
+
+insert into public.auto_reply_knowledge (id, title, keywords, response, sort_order)
+values
+  (
+    'default-availability',
+    'Availability and reservations',
+    array['available', 'availability', 'vacant', 'date', 'book', 'reserve', 'reservation'],
+    'For availability, please choose your cottage and dates on the booking page so we can check the calendar right away. If you already sent your dates, admin will review this chat and confirm the next step.',
+    10
+  ),
+  (
+    'default-rates',
+    'Cottage rates',
+    array['rate', 'rates', 'price', 'cost', 'how much', 'fee'],
+    'Current daily rates start at Php700 for Cove cottages, Php800 for Rock and RD cottages, Php4,500 for VGP Hall, and Php3,500 for the Pavillon. Final totals depend on cottage and dates.',
+    20
+  ),
+  (
+    'default-payment',
+    'Payment verification',
+    array['pay', 'payment', 'deposit', 'gcash', 'paid', 'proof', 'receipt'],
+    'Please keep your payment proof ready. Admin will verify the payment status and update your booking once the proof has been checked.',
+    30
+  ),
+  (
+    'default-changes',
+    'Cancellations and date changes',
+    array['cancel', 'refund', 'reschedule', 'move', 'change date'],
+    'For cancellations or date changes, please include your booking ID, contact number, and preferred new date if rescheduling. Admin will check the policy and availability.',
+    40
+  ),
+  (
+    'default-location',
+    'Location and directions',
+    array['where', 'location', 'address', 'directions', 'map'],
+    'Please send your preferred travel date and contact number here. Admin can share the latest directions and arrival details for your visit.',
+    50
+  )
 on conflict (id) do nothing;
 
 insert into public.room_categories (id, name, description, sort_order) values
