@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { findBlockedBookingDate, type BookingBlockedDate } from "@/lib/booking-blocked-dates";
-import { findBookingConflict } from "@/lib/booking-logic";
+import { findBookingConflict, dateRangesOverlap } from "@/lib/booking-logic";
 import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
 import { getDemoBookings, saveDemoBooking } from "@/lib/demo-bookings";
 import { nightsBetween } from "@/lib/resort-data";
@@ -18,6 +18,7 @@ type FormState = {
 };
 
 const today = new Date().toISOString().slice(0, 10);
+const todayMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
 const activeStatuses: BookingStatus[] = ["pending", "confirmed"];
 
 function normalizeBooking(row: BookingRow): Booking {
@@ -59,8 +60,10 @@ export function DateCottageBooking({
     () => categories.filter((category) => rooms.some((room) => room.categoryId === category.id)),
     [categories, rooms],
   );
-  const [date, setDate] = useState(today);
-  const [selectedCategoryId, setSelectedCategoryId] = useState(categoryOptions[0]?.id || "");
+  const [month, setMonth] = useState(todayMonth);
+  const bookingDate = `${month}-01`;
+  const [selectedDay, setSelectedDay] = useState<string>(bookingDate);
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [blockedDates, setBlockedDates] = useState<BookingBlockedDate[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState("");
@@ -72,7 +75,6 @@ export function DateCottageBooking({
   });
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const bookingPanelRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -128,11 +130,12 @@ export function DateCottageBooking({
   }, []);
 
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId);
-  const total = selectedRoom ? selectedRoom.pricePerNight * nightsBetween(date, date) : 0;
-  const blockedDate = findBlockedBookingDate(date, date, blockedDates);
+  const effectiveDay = selectedDay || bookingDate;
+  const total = selectedRoom ? selectedRoom.pricePerNight * nightsBetween(effectiveDay, effectiveDay) : 0;
+  const blockedDate = findBlockedBookingDate(effectiveDay, effectiveDay, blockedDates);
   const selectedCategory = categoryOptions.find((category) => category.id === selectedCategoryId) || categoryOptions[0];
   const visibleRooms = useMemo(
-    () => rooms.filter((room) => room.categoryId === (selectedCategory?.id || "")),
+    () => rooms.filter((room) => room.categoryId === selectedCategory?.id),
     [rooms, selectedCategory?.id],
   );
 
@@ -141,9 +144,38 @@ export function DateCottageBooking({
     [bookings],
   );
 
-  function getDateBooking(roomId: string) {
-    return findBookingConflict(activeBookings, roomId, date, date);
+  function getDateBooking(roomId: string, day = effectiveDay) {
+    return findBookingConflict(activeBookings, roomId, day, day);
   }
+
+  function monthRangeFromMonthString(monthStr: string) {
+    const [y, m] = monthStr.split("-");
+    const start = `${y}-${m}-01`;
+    const end = new Date(Number(y), Number(m), 0).toISOString().slice(0, 10);
+    return { start, end };
+  }
+
+  function getMonthDays(monthStr: string) {
+    const [y, m] = monthStr.split("-");
+    const year = Number(y);
+    const monthIndex = Number(m) - 1;
+    const count = new Date(year, monthIndex + 1, 0).getDate();
+    return Array.from({ length: count }, (_, i) => {
+      const d = i + 1;
+      const mm = String(monthIndex + 1).padStart(2, "0");
+      return `${y}-${mm}-${String(d).padStart(2, "0")}`;
+    });
+  }
+
+  const monthDays = useMemo(() => getMonthDays(month), [month]);
+  const weekdayLabels = useMemo(
+    () => monthDays.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(day).getDay()]),
+    [monthDays],
+  );
+  const calendarStyle = useMemo(
+    () => ({ "--days-count": String(monthDays.length) } as React.CSSProperties),
+    [monthDays],
+  );
 
   function selectCategory(categoryId: string) {
     setSelectedCategoryId(categoryId);
@@ -171,9 +203,21 @@ export function DateCottageBooking({
       guestEmail: current.guestEmail || user?.email || "",
       guests: Math.min(current.guests || 1, room.maxGuests),
     }));
-    window.requestAnimationFrame(() => {
-      bookingPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+  }
+
+  function selectCell(room: Room, day: string) {
+    const blocked = findBlockedBookingDate(day, day, blockedDates);
+    if (blocked.blocked) {
+      setMessage(blocked.reason);
+      return;
+    }
+
+    const conflict = getDateBooking(room.id, day);
+    if (room.available === false || conflict) return;
+
+    setSelectedDay(day);
+    setSelectedRoomId(room.id);
+    setMessage("");
   }
 
   async function submitBooking(event: React.FormEvent<HTMLFormElement>) {
@@ -187,7 +231,7 @@ export function DateCottageBooking({
 
     const conflict = getDateBooking(selectedRoom.id);
     if (conflict) {
-      setMessage(`${selectedRoom.name} is already booked on ${date}.`);
+      setMessage(`${selectedRoom.name} is already booked on ${effectiveDay}.`);
       return;
     }
 
@@ -204,8 +248,8 @@ export function DateCottageBooking({
       guestName: form.guestName,
       guestEmail: form.guestEmail,
       guestPhone: form.guestPhone,
-      checkIn: date,
-      checkOut: date,
+      checkIn: effectiveDay,
+      checkOut: effectiveDay,
       guests: form.guests,
       totalPrice: total,
     };
@@ -234,8 +278,8 @@ export function DateCottageBooking({
           guestName: form.guestName,
           guestEmail: form.guestEmail,
           guestPhone: form.guestPhone,
-          checkIn: date,
-          checkOut: date,
+          checkIn: effectiveDay,
+          checkOut: effectiveDay,
           guests: form.guests,
           totalPrice: total,
           status: "pending",
@@ -244,7 +288,7 @@ export function DateCottageBooking({
         });
       }
 
-      setMessage(result.message || `${selectedRoom.name} is held as a pending booking for ${date}.`);
+      setMessage(result.message || `${selectedRoom.name} is held as a pending booking for ${effectiveDay}.`);
       setSelectedRoomId("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to save booking.");
@@ -254,27 +298,32 @@ export function DateCottageBooking({
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+    <div className="grid gap-6 lg:grid-cols-1">
       <div className="grid gap-6">
         <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <label htmlFor="booking-date" className="text-sm font-semibold text-slate-700">
-            Booking date
+          <label htmlFor="booking-month" className="text-sm font-semibold text-slate-700">
+            Booking month
           </label>
           <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center">
             <input
-              id="booking-date"
-              type="date"
-              min={today}
-              value={date}
+              id="booking-month"
+              type="month"
+              min={todayMonth}
+              value={month}
               onChange={(event) => {
-                setDate(event.target.value);
+                const newMonth = event.target.value;
+                setMonth(newMonth);
+                setSelectedDay(`${newMonth}-01`);
                 setSelectedRoomId("");
                 setMessage("");
               }}
               className="min-h-12 rounded-md border border-slate-300 px-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
             />
             <p className="text-sm text-slate-500">
-              {activeBookings.filter((booking) => findBookingConflict([booking], booking.roomId, date, date)).length} cottage booking(s) found for this date.
+              {(() => {
+                const { start, end } = monthRangeFromMonthString(month);
+                return activeBookings.filter((booking) => dateRangesOverlap(booking.checkIn, booking.checkOut, start, end)).length;
+              })()}{" "}cottage booking(s) found for this month.
             </p>
           </div>
           {blockedDate.blocked ? (
@@ -286,7 +335,7 @@ export function DateCottageBooking({
 
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-sm font-semibold text-slate-700">Category</p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-3 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
             {categoryOptions.map((category) => {
               const categoryRoomCount = rooms.filter((room) => room.categoryId === category.id).length;
               const selected = selectedCategory?.id === category.id;
@@ -296,14 +345,19 @@ export function DateCottageBooking({
                   key={category.id}
                   type="button"
                   onClick={() => selectCategory(category.id)}
-                  className={`rounded-lg border px-4 py-3 text-left transition ${
+                  className={`h-full w-full rounded-lg border px-4 py-4 text-left transition ${
                     selected
                       ? "border-bolihon-green bg-bolihon-green text-white shadow-sm"
                       : "border-slate-200 bg-white text-slate-700 hover:border-bolihon-green hover:text-bolihon-green"
                   }`}
                 >
-                  <span className="block text-sm font-bold">{category.name}</span>
-                  <span className={`mt-1 block text-xs ${selected ? "text-white/80" : "text-slate-500"}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-sm font-bold leading-tight">{category.name}</span>
+                    <span className={`text-xs font-semibold ${selected ? "text-white/80" : "text-slate-500"}`}>
+                      {categoryRoomCount}
+                    </span>
+                  </div>
+                  <span className={`mt-3 block text-xs ${selected ? "text-white/80" : "text-slate-500"}`}>
                     {categoryRoomCount} cottage{categoryRoomCount === 1 ? "" : "s"}
                   </span>
                 </button>
@@ -318,61 +372,133 @@ export function DateCottageBooking({
               <h2 className="text-xl font-bold text-slate-950">{selectedCategory.name}</h2>
               <p className="mt-1 text-sm text-slate-500">{selectedCategory.description}</p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {visibleRooms.map((room) => {
-                const booking = getDateBooking(room.id);
-                const disabled = room.available === false || Boolean(booking);
-                const selected = selectedRoomId === room.id;
 
-                return (
-                  <button
-                    key={room.id}
-                    type="button"
-                    disabled={blockedDate.blocked || disabled}
-                    onClick={() => selectRoom(room)}
-                    className={`min-h-40 rounded-lg border p-4 text-left shadow-sm transition ${
-                      selected
-                        ? "border-bolihon-green bg-lime-50 ring-2 ring-bolihon-green/30"
-                        : blockedDate.blocked || disabled
-                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500"
-                          : "border-slate-200 bg-white hover:border-bolihon-green hover:shadow-md"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="font-bold text-slate-950">{room.name}</h3>
-                        <p className="mt-1 text-sm text-slate-600">
-                          {formatPeso(room.pricePerNight)}/day - max {room.maxGuests}
-                        </p>
+            <div className="overflow-auto rounded border bg-white">
+              <div className="min-w-full">
+                {/* Header: days */}
+                <div className="sticky top-0 z-10 bg-white/80 px-2 py-2" style={calendarStyle}>
+                  <div className="grid grid-cols-[100px_repeat(var(--days-count),20px)] items-center gap-1" style={calendarStyle}>
+                    <div className="px-2 text-xs font-semibold">Cottage</div>
+                    {monthDays.map((day) => (
+                      <div key={`${day}-number`} className="text-xs text-center text-slate-600" title={day}>
+                        {new Date(day).getDate()}
                       </div>
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          room.available === false
-                            ? "bg-slate-200 text-slate-600"
-                            : booking
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-emerald-50 text-emerald-800"
-                        }`}
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-[100px_repeat(var(--days-count),20px)] items-center gap-1 mt-1" style={calendarStyle}>
+                    <div className="px-2 text-xs font-semibold">Day</div>
+                    {weekdayLabels.map((label, index) => (
+                      <div
+                        key={`${monthDays[index]}-weekday`}
+                        className={`text-[10px] text-center font-semibold ${label === "Sat" || label === "Sun" ? "text-rose-600" : "text-slate-500"}`}
                       >
-                        {blockedDate.blocked ? "Blocked" : room.available === false ? "Offline" : booking ? "Booked" : "Open"}
-                      </span>
-                    </div>
-                    <p className="mt-4 line-clamp-2 text-sm text-slate-600">{room.description}</p>
-                    {booking ? (
-                      <div className="mt-4 rounded-md bg-white/70 px-3 py-2 text-sm">
-                        {isManager ? (
-                          <>
-                            <p className="font-semibold text-slate-900">{booking.guestName || "Guest name unavailable"}</p>
-                            <p className="mt-1 text-slate-600">{booking.guestPhone || booking.guestEmail || "No contact recorded"}</p>
-                          </>
-                        ) : (
-                          <p className="font-semibold text-slate-600">Already reserved for this date</p>
-                        )}
+                        {label}
                       </div>
-                    ) : null}
+                    ))}
+                  </div>
+                </div>
+
+                {/* Rows: cottages */}
+                <div className="grid" style={calendarStyle}>
+                  {visibleRooms.map((room) => (
+                    <div key={room.id} className="grid grid-cols-[100px_repeat(var(--days-count),20px)] items-center gap-1 border-t px-2 py-1" style={calendarStyle}>
+                      <div className="flex items-center gap-1">
+                        <div className="text-sm font-semibold">{room.name}</div>
+                        <div className="text-xs text-slate-500">{formatPeso(room.pricePerNight)}</div>
+                      </div>
+                      {monthDays.map((day) => {
+                        const blocked = findBlockedBookingDate(day, day, blockedDates);
+                        const hasBooking = activeBookings.some((b) => b.roomId === room.id && dateRangesOverlap(b.checkIn, b.checkOut, day, day));
+                        const disabled = room.available === false || hasBooking || blocked.blocked;
+
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => selectCell(room, day)}
+                            className={`h-5 w-5 rounded-sm border flex items-center justify-center transition ${
+                              disabled
+                                ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
+                                : "bg-emerald-500 border-emerald-500 text-white hover:bg-emerald-600"
+                            }`}
+                            title={`${room.name} — ${day}`}
+                          />
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-5">
+              <div className="mb-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-700">Booking details</p>
+                  {selectedRoom ? (
+                    <p className="mt-2 text-sm text-slate-600">
+                      Selected <span className="font-semibold text-slate-900">{selectedRoom.name}</span> on <span className="font-semibold text-slate-900">{effectiveDay}</span>.
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-600">
+                      Click a green cell to choose an available cottage and date.
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-3 text-sm text-slate-600">
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-sm bg-emerald-500 border border-emerald-500" />
+                    Available
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-sm bg-slate-100 border border-slate-200" />
+                    Booked / blocked
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="text-rose-600 font-semibold">Sat / Sun</span>
+                    Weekend
+                  </span>
+                </div>
+              </div>
+
+              {selectedRoom ? (
+                <form onSubmit={submitBooking} className="grid gap-4">
+                  <Field label="Guest name" value={form.guestName} onChange={(guestName) => setForm((current) => ({ ...current, guestName }))} />
+                  <Field label="Cellphone no." type="tel" value={form.guestPhone} onChange={(guestPhone) => setForm((current) => ({ ...current, guestPhone }))} />
+                  <Field
+                    label="Email (optional)"
+                    type="email"
+                    required={false}
+                    value={form.guestEmail}
+                    onChange={(guestEmail) => setForm((current) => ({ ...current, guestEmail }))}
+                  />
+                  <div>
+                    <label htmlFor="date-guests" className="text-sm font-semibold text-slate-700">
+                      Guests
+                    </label>
+                    <input
+                      id="date-guests"
+                      type="number"
+                      min={1}
+                      max={selectedRoom.maxGuests}
+                      value={form.guests}
+                      onChange={(event) => setForm((current) => ({ ...current, guests: Number(event.target.value) }))}
+                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={submitting || blockedDate.blocked || form.guests < 1 || form.guests > selectedRoom.maxGuests || !form.guestPhone.trim()}
+                    className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {submitting ? "Holding..." : "Hold this cottage"}
                   </button>
-                );
-              })}
+                </form>
+              ) : null}
+
+              {message ? <p className="mt-4 rounded-md bg-cyan-50 px-4 py-3 text-sm text-cyan-900">{message}</p> : null}
             </div>
           </section>
         ) : (
@@ -381,61 +507,6 @@ export function DateCottageBooking({
           </div>
         )}
       </div>
-
-      <aside
-        ref={bookingPanelRef}
-        className="h-fit scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-xl shadow-cyan-950/10 lg:sticky lg:top-28"
-      >
-        <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">Booking details</p>
-        {selectedRoom ? (
-          <form onSubmit={submitBooking} className="mt-4 grid gap-4">
-            <div>
-              <h2 className="text-2xl font-bold text-slate-950">{selectedRoom.name}</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {date} - {formatPeso(total)}
-              </p>
-              <p className="mt-3 rounded-md bg-lime-50 px-3 py-2 text-sm font-medium text-lime-900">
-                Complete this booking here. Your selected date stays locked to this request.
-              </p>
-            </div>
-            <Field label="Guest name" value={form.guestName} onChange={(guestName) => setForm((current) => ({ ...current, guestName }))} />
-            <Field label="Cellphone no." type="tel" value={form.guestPhone} onChange={(guestPhone) => setForm((current) => ({ ...current, guestPhone }))} />
-            <Field
-              label="Email (optional)"
-              type="email"
-              required={false}
-              value={form.guestEmail}
-              onChange={(guestEmail) => setForm((current) => ({ ...current, guestEmail }))}
-            />
-            <div>
-              <label htmlFor="date-guests" className="text-sm font-semibold text-slate-700">
-                Guests
-              </label>
-              <input
-                id="date-guests"
-                type="number"
-                min={1}
-                max={selectedRoom.maxGuests}
-                value={form.guests}
-                onChange={(event) => setForm((current) => ({ ...current, guests: Number(event.target.value) }))}
-                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={submitting || blockedDate.blocked || form.guests < 1 || form.guests > selectedRoom.maxGuests || !form.guestPhone.trim()}
-              className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              {submitting ? "Holding..." : "Hold this cottage"}
-            </button>
-          </form>
-        ) : (
-          <div className="mt-4 rounded-lg bg-cyan-50 p-4 text-sm text-cyan-950">
-            Choose an open cottage from the date map to start the booking process on this page.
-          </div>
-        )}
-        {message ? <p className="mt-4 rounded-md bg-cyan-50 px-4 py-3 text-sm text-cyan-900">{message}</p> : null}
-      </aside>
     </div>
   );
 }
