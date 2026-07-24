@@ -17,7 +17,6 @@ type FormState = {
   guests: number;
 };
 
-const today = new Date().toISOString().slice(0, 10);
 const todayMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
 const activeStatuses: BookingStatus[] = ["pending", "confirmed"];
 
@@ -172,8 +171,10 @@ export function DateCottageBooking({
     () => monthDays.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(day).getDay()]),
     [monthDays],
   );
-  const calendarStyle = useMemo(
-    () => ({ "--days-count": String(monthDays.length) } as React.CSSProperties),
+  const calendarGridStyle = useMemo(
+    () => ({
+      gridTemplateColumns: `minmax(180px, 1.6fr) repeat(${monthDays.length}, minmax(24px, 1fr))`,
+    }),
     [monthDays],
   );
 
@@ -184,25 +185,6 @@ export function DateCottageBooking({
       const currentRoom = rooms.find((room) => room.id === currentRoomId);
       return currentRoom?.categoryId === categoryId ? currentRoomId : "";
     });
-  }
-
-  function selectRoom(room: Room) {
-    if (blockedDate.blocked) {
-      setSelectedRoomId("");
-      setMessage(blockedDate.reason);
-      return;
-    }
-
-    if (room.available === false || getDateBooking(room.id)) return;
-    setSelectedRoomId(room.id);
-    setMessage("");
-    setForm((current) => ({
-      ...current,
-      guestName: current.guestName || user?.name || "",
-      guestPhone: current.guestPhone || user?.phone || "",
-      guestEmail: current.guestEmail || user?.email || "",
-      guests: Math.min(current.guests || 1, room.maxGuests),
-    }));
   }
 
   function selectCell(room: Room, day: string) {
@@ -374,19 +356,22 @@ export function DateCottageBooking({
             </div>
 
             <div className="overflow-auto rounded border bg-white">
-              <div className="min-w-full">
+              <div className="min-w-[1050px] w-full">
                 {/* Header: days */}
-                <div className="sticky top-0 z-10 bg-white/80 px-2 py-2" style={calendarStyle}>
-                  <div className="grid grid-cols-[100px_repeat(var(--days-count),20px)] items-center gap-1" style={calendarStyle}>
-                    <div className="px-2 text-xs font-semibold">Cottage</div>
+                <div className="sticky top-0 z-10 bg-white/95 px-2 py-3">
+                  <div className="grid items-center gap-1" style={calendarGridStyle}>
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 px-3 text-xs font-semibold">
+                      <span>Cottage</span>
+                      <span>Rate</span>
+                    </div>
                     {monthDays.map((day) => (
                       <div key={`${day}-number`} className="text-xs text-center text-slate-600" title={day}>
                         {new Date(day).getDate()}
                       </div>
                     ))}
                   </div>
-                  <div className="grid grid-cols-[100px_repeat(var(--days-count),20px)] items-center gap-1 mt-1" style={calendarStyle}>
-                    <div className="px-2 text-xs font-semibold">Day</div>
+                  <div className="mt-1 grid items-center gap-1" style={calendarGridStyle}>
+                    <div className="px-3 text-xs font-semibold text-slate-500">Day</div>
                     {weekdayLabels.map((label, index) => (
                       <div
                         key={`${monthDays[index]}-weekday`}
@@ -399,12 +384,12 @@ export function DateCottageBooking({
                 </div>
 
                 {/* Rows: cottages */}
-                <div className="grid" style={calendarStyle}>
+                <div>
                   {visibleRooms.map((room) => (
-                    <div key={room.id} className="grid grid-cols-[100px_repeat(var(--days-count),20px)] items-center gap-1 border-t px-2 py-1" style={calendarStyle}>
-                      <div className="flex items-center gap-1">
-                        <div className="text-sm font-semibold">{room.name}</div>
-                        <div className="text-xs text-slate-500">{formatPeso(room.pricePerNight)}</div>
+                    <div key={room.id} className="grid items-center gap-1 border-t px-2 py-2" style={calendarGridStyle}>
+                      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3">
+                        <div className="text-sm font-semibold leading-snug text-slate-900">{room.name}</div>
+                        <div className="whitespace-nowrap text-xs font-medium text-slate-500">{formatPeso(room.pricePerNight)}</div>
                       </div>
                       {monthDays.map((day) => {
                         const blocked = findBlockedBookingDate(day, day, blockedDates);
@@ -417,7 +402,7 @@ export function DateCottageBooking({
                             type="button"
                             disabled={disabled}
                             onClick={() => selectCell(room, day)}
-                            className={`h-5 w-5 rounded-sm border flex items-center justify-center transition ${
+                            className={`h-7 w-full min-w-6 rounded-sm border flex items-center justify-center transition ${
                               disabled
                                 ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
                                 : "bg-emerald-500 border-emerald-500 text-white hover:bg-emerald-600"
