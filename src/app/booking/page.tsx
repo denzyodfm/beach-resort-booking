@@ -1,4 +1,5 @@
 import { BookingForm } from "@/components/booking/booking-form";
+import { ReservationPolicies } from "@/components/reservation-policies";
 import { getRoomCatalog } from "@/lib/rooms-server";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,9 @@ export default async function BookingPage(props: PageProps<"/booking">) {
               <li key={item}>{item}</li>
             ))}
           </ul>
+        </div>
+        <div className="mt-6">
+          <ReservationPolicies />
         </div>
       </div>
       <BookingForm rooms={rooms} categories={categories} initialRoomId={initialRoomId} />

@@ -1,4 +1,5 @@
 import { DateCottageBooking } from "@/components/booking/date-cottage-booking";
+import { ReservationPolicies } from "@/components/reservation-policies";
 import { getRoomCatalog } from "@/lib/rooms-server";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,7 @@ export default async function BookingByDatePage() {
           admin users can see the reservation owner while guests only see the unavailable status.
         </p>
       </div>
+      <ReservationPolicies />
       <DateCottageBooking rooms={rooms} categories={categories} />
     </section>
   );
