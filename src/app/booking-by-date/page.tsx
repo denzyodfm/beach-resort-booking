@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 export default async function BookingByDatePage() {
   const { rooms, categories } = await getRoomCatalog();
+  const resortToday = getResortToday();
 
   return (
     <section className="mx-auto grid max-w-7xl gap-8 px-4 py-12 sm:px-6 lg:px-8">
@@ -18,7 +19,18 @@ export default async function BookingByDatePage() {
         </p>
       </div>
       <ReservationPolicies />
-      <DateCottageBooking rooms={rooms} categories={categories} />
+      <DateCottageBooking rooms={rooms} categories={categories} resortToday={resortToday} />
     </section>
   );
+}
+
+function getResortToday() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
 }

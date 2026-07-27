@@ -17,19 +17,6 @@ type FormState = {
   guests: number;
 };
 
-function getResortToday() {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${value.year}-${value.month}-${value.day}`;
-}
-
-const today = getResortToday();
-const todayMonth = today.slice(0, 7); // YYYY-MM
 const activeStatuses: BookingStatus[] = ["pending", "confirmed"];
 
 function normalizeBooking(row: BookingRow): Booking {
@@ -60,10 +47,14 @@ function formatPeso(value: number) {
 export function DateCottageBooking({
   rooms,
   categories,
+  resortToday,
 }: {
   rooms: Room[];
   categories: CottageCategory[];
+  resortToday: string;
 }) {
+  const today = resortToday;
+  const todayMonth = today.slice(0, 7);
   const { user } = useDemoAuth();
   const isManager = canManageResort(user?.role);
   const supabaseConfigured = hasSupabaseEnv();
