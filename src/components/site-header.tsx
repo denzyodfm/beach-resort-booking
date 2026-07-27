@@ -24,17 +24,26 @@ export function SiteHeader() {
         <div className="flex items-center justify-between gap-4">
           <BolihonLogo href="/" />
           {user ? (
-            <div className="flex items-center gap-3">
-              <span className="hidden text-right text-xs text-slate-500 sm:block">
-                <span className="block font-semibold capitalize text-slate-800">{user.role}</span>
-                {user.name}
-              </span>
-              <button
-                onClick={logout}
-                className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            <div className="grid min-w-40 gap-2">
+              <div className="flex items-center justify-end gap-3">
+                <span className="hidden text-right text-xs text-slate-500 sm:block">
+                  <span className="block font-semibold capitalize text-slate-800">{user.role}</span>
+                  {user.name}
+                </span>
+                <button
+                  onClick={logout}
+                  className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Logout
+                </button>
+              </div>
+              <Link
+                href="/booking-by-date"
+                prefetch
+                className="rounded-lg bg-bolihon-green px-6 py-3 text-center text-base font-bold text-white shadow-md transition hover:bg-bolihon-green-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bolihon-green"
               >
-                Logout
-              </button>
+                Book Here
+              </Link>
             </div>
           ) : (
             <Link
