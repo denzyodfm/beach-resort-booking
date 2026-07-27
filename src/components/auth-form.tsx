@@ -15,7 +15,7 @@ export function AuthForm() {
   const defaultRole: DemoRole = canManageResort(requestedRole) ? requestedRole : "guest";
   const [role, setRole] = useState<DemoRole>(defaultRole);
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [loginIdentifier, setLoginIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
@@ -33,12 +33,26 @@ export function AuthForm() {
 
     try {
       if (canManageResort(role) && supabaseConfigured) {
-        if (!email.trim() || !password) {
-          setMessage("Enter the Supabase staff/admin email and password.");
+        if (!loginIdentifier.trim() || !password) {
+          setMessage("Enter your username or email and password.");
           return;
         }
 
-        await loginWithPassword(email.trim(), password);
+        let loginEmail = loginIdentifier.trim();
+        if (!loginEmail.includes("@")) {
+          const response = await fetch("/api/auth/resolve-login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ identifier: loginEmail }),
+          });
+          const result = (await response.json()) as { email?: string; message?: string };
+          if (!response.ok || !result.email) {
+            throw new Error(result.message || "Invalid username/email or password.");
+          }
+          loginEmail = result.email;
+        }
+
+        await loginWithPassword(loginEmail, password);
         router.push(destination);
         return;
       }
@@ -56,7 +70,7 @@ export function AuthForm() {
       login({
         role,
         name: name.trim() || (canManageResort(role) ? `BOLIHON ${role}` : "Guest"),
-        email: email.trim(),
+        email: loginIdentifier.trim(),
         phone: phone.trim(),
       });
       router.push(destination);
@@ -96,9 +110,16 @@ export function AuthForm() {
 
       <div className="grid gap-4">
         <Field label="Name" value={name} onChange={setName} />
-        <Field label="Email" type="email" value={email} onChange={setEmail} required={canManageResort(role) && supabaseConfigured} />
+        <Field
+          label={canManageResort(role) && supabaseConfigured ? "Username or email" : "Email"}
+          type={canManageResort(role) && supabaseConfigured ? "text" : "email"}
+          value={loginIdentifier}
+          onChange={setLoginIdentifier}
+          required={canManageResort(role) && supabaseConfigured}
+          autoComplete={canManageResort(role) && supabaseConfigured ? "username" : "email"}
+        />
         {canManageResort(role) && supabaseConfigured ? (
-          <Field label="Password" type="password" value={password} onChange={setPassword} />
+          <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
         ) : null}
         {role === "guest" ? (
           <Field label="Cellphone no." type="tel" value={phone} onChange={setPhone} required />
@@ -124,12 +145,14 @@ function Field({
   type = "text",
   value,
   required = true,
+  autoComplete,
   onChange,
 }: {
   label: string;
   type?: string;
   value: string;
   required?: boolean;
+  autoComplete?: string;
   onChange: (value: string) => void;
 }) {
   const id = label.toLowerCase().replace(/\W+/g, "-");
@@ -143,6 +166,7 @@ function Field({
         id={id}
         type={type}
         required={required}
+        autoComplete={autoComplete}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 outline-none ring-bolihon-green focus:ring-2"
