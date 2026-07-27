@@ -17,7 +17,18 @@ type FormState = {
   guests: number;
 };
 
-const today = new Date().toISOString().slice(0, 10);
+function getResortToday() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+const today = getResortToday();
 const todayMonth = today.slice(0, 7); // YYYY-MM
 const activeStatuses: BookingStatus[] = ["pending", "confirmed"];
 
@@ -143,6 +154,12 @@ export function DateCottageBooking({
     () => bookings.filter((booking) => activeStatuses.includes(booking.status)),
     [bookings],
   );
+  const monthBookings = useMemo(() => {
+    const { start, end } = monthRangeFromMonthString(month);
+    return activeBookings.filter((booking) =>
+      dateRangesOverlap(booking.checkIn, booking.checkOut, start, end),
+    );
+  }, [activeBookings, month]);
 
   function getDateBooking(roomId: string, day = effectiveDay) {
     return findBookingConflict(activeBookings, roomId, day, day);
@@ -307,12 +324,20 @@ export function DateCottageBooking({
               }}
               className="min-h-12 rounded-md border border-slate-300 px-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
             />
-            <p className="text-sm text-slate-500">
-              {(() => {
-                const { start, end } = monthRangeFromMonthString(month);
-                return activeBookings.filter((booking) => dateRangesOverlap(booking.checkIn, booking.checkOut, start, end)).length;
-              })()}{" "}cottage booking(s) found for this month.
-            </p>
+            <div className="flex flex-1 flex-wrap items-center gap-2">
+              <p className="text-sm text-slate-500">
+                {monthBookings.length} cottage booking(s) found for this month.
+              </p>
+              {monthBookings.map((booking) => (
+                <span
+                  key={booking.id}
+                  className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900"
+                >
+                  {booking.roomName} · {booking.checkIn}
+                  {booking.checkOut !== booking.checkIn ? ` to ${booking.checkOut}` : ""}
+                </span>
+              ))}
+            </div>
           </div>
           {blockedDate.blocked ? (
             <p className="mt-3 rounded-md bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
@@ -402,6 +427,11 @@ export function DateCottageBooking({
                         const hasBooking = activeBookings.some((b) => b.roomId === room.id && dateRangesOverlap(b.checkIn, b.checkOut, day, day));
                         const isPastDate = day < today;
                         const disabled = isPastDate || room.available === false || hasBooking || blocked.blocked;
+                        const cellStyle = hasBooking
+                          ? "cursor-not-allowed border-amber-400 bg-amber-400 text-amber-950"
+                          : disabled
+                            ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                            : "border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600";
 
                         return (
                           <button
@@ -409,12 +439,14 @@ export function DateCottageBooking({
                             type="button"
                             disabled={disabled}
                             onClick={() => selectCell(room, day)}
-                            className={`h-7 w-full min-w-6 rounded-sm border flex items-center justify-center transition ${
-                              disabled
-                                ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
-                                : "bg-emerald-500 border-emerald-500 text-white hover:bg-emerald-600"
-                            }`}
-                            title={isPastDate ? `${day} — Past date` : `${room.name} — ${day}`}
+                            className={`flex h-7 w-full min-w-6 items-center justify-center rounded-sm border transition ${cellStyle}`}
+                            title={
+                              hasBooking
+                                ? `${room.name} — Booked on ${day}`
+                                : isPastDate
+                                  ? `${day} — Past date`
+                                  : `${room.name} — ${day}`
+                            }
                           />
                         );
                       })}
@@ -446,7 +478,11 @@ export function DateCottageBooking({
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="h-4 w-4 rounded-sm bg-slate-100 border border-slate-200" />
-                    Booked / blocked
+                    Past / blocked
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-sm border border-amber-400 bg-amber-400" />
+                    Booked
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="text-rose-600 font-semibold">Sat / Sun</span>
