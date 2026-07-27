@@ -17,7 +17,8 @@ type FormState = {
   guests: number;
 };
 
-const todayMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+const today = new Date().toISOString().slice(0, 10);
+const todayMonth = today.slice(0, 7); // YYYY-MM
 const activeStatuses: BookingStatus[] = ["pending", "confirmed"];
 
 function normalizeBooking(row: BookingRow): Booking {
@@ -60,7 +61,7 @@ export function DateCottageBooking({
     [categories, rooms],
   );
   const [month, setMonth] = useState(todayMonth);
-  const bookingDate = `${month}-01`;
+  const bookingDate = month === todayMonth ? today : `${month}-01`;
   const [selectedDay, setSelectedDay] = useState<string>(bookingDate);
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -188,6 +189,11 @@ export function DateCottageBooking({
   }
 
   function selectCell(room: Room, day: string) {
+    if (day < today) {
+      setMessage("Past dates are not available for booking.");
+      return;
+    }
+
     const blocked = findBlockedBookingDate(day, day, blockedDates);
     if (blocked.blocked) {
       setMessage(blocked.reason);
@@ -295,7 +301,7 @@ export function DateCottageBooking({
               onChange={(event) => {
                 const newMonth = event.target.value;
                 setMonth(newMonth);
-                setSelectedDay(`${newMonth}-01`);
+                setSelectedDay(newMonth === todayMonth ? today : `${newMonth}-01`);
                 setSelectedRoomId("");
                 setMessage("");
               }}
@@ -394,7 +400,8 @@ export function DateCottageBooking({
                       {monthDays.map((day) => {
                         const blocked = findBlockedBookingDate(day, day, blockedDates);
                         const hasBooking = activeBookings.some((b) => b.roomId === room.id && dateRangesOverlap(b.checkIn, b.checkOut, day, day));
-                        const disabled = room.available === false || hasBooking || blocked.blocked;
+                        const isPastDate = day < today;
+                        const disabled = isPastDate || room.available === false || hasBooking || blocked.blocked;
 
                         return (
                           <button
@@ -407,7 +414,7 @@ export function DateCottageBooking({
                                 ? "bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed"
                                 : "bg-emerald-500 border-emerald-500 text-white hover:bg-emerald-600"
                             }`}
-                            title={`${room.name} — ${day}`}
+                            title={isPastDate ? `${day} — Past date` : `${room.name} — ${day}`}
                           />
                         );
                       })}
