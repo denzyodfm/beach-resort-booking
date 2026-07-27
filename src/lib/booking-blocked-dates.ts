@@ -25,20 +25,20 @@ export function normalizeBlockedDate(row: BookingBlockedDate | Record<string, un
 }
 
 export function isWeekendDate(date: string) {
-  const parsed = new Date(`${date}T00:00:00`);
+  const parsed = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) return false;
-  const day = parsed.getDay();
+  const day = parsed.getUTCDay();
   return day === 0 || day === 6;
 }
 
 export function getWeekendLabel(date: string) {
-  const parsed = new Date(`${date}T00:00:00`);
-  return parsed.getDay() === 6 ? "Saturday" : "Sunday";
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return parsed.getUTCDay() === 6 ? "Saturday" : "Sunday";
 }
 
 export function getDatesInRange(checkIn: string, checkOut: string) {
-  const start = new Date(`${checkIn}T00:00:00`);
-  const end = new Date(`${checkOut}T00:00:00`);
+  const start = new Date(`${checkIn}T00:00:00Z`);
+  const end = new Date(`${checkOut}T00:00:00Z`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
 
   const dates: string[] = [];
@@ -46,7 +46,7 @@ export function getDatesInRange(checkIn: string, checkOut: string) {
 
   while (cursor <= end) {
     dates.push(cursor.toISOString().slice(0, 10));
-    cursor.setDate(cursor.getDate() + 1);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 
   return dates;
