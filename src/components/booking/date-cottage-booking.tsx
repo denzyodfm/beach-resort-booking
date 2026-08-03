@@ -377,10 +377,10 @@ export function DateCottageBooking({
               <p className="mt-1 text-sm text-slate-500">{selectedCategory.description}</p>
             </div>
 
-            <div className="overflow-auto rounded border bg-white">
+            <div className="max-h-[70vh] min-h-96 overflow-auto overscroll-contain rounded border bg-white [scrollbar-gutter:stable]">
               <div className="min-w-[1050px] w-full">
                 {/* Header: days */}
-                <div className="sticky top-0 z-10 bg-white/95 px-2 py-3">
+                <div className="sticky top-0 z-20 border-b border-slate-300 bg-white px-2 py-3 shadow-sm">
                   <div className="grid items-center gap-1" style={calendarGridStyle}>
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 px-3 text-xs font-semibold">
                       <span>Cottage</span>
