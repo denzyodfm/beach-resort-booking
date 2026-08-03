@@ -25,6 +25,7 @@ export type Room = {
   gallery: string[];
   amenities: string[];
   bookingIncludes: string[];
+  reservationHoldHours: number;
   featured?: boolean;
   available?: boolean;
 };

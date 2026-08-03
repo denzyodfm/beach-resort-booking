@@ -315,6 +315,10 @@ export function BookingForm({
         </div>
       </div>
 
+      <p className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+        This cottage will be held for {selectedRoom?.reservationHoldHours || 24} hours after booking. Unpaid reservations are cancelled automatically when the hold expires.
+      </p>
+
       <div className="rounded-md border border-cyan-100 bg-cyan-50 p-4">
         <p className="text-sm font-semibold text-cyan-950">Unavailable dates</p>
         {unavailableRanges.length ? (

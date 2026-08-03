@@ -20,6 +20,16 @@ export const defaultBookingIncludes = [
   "Guest dashboard visibility after sign in",
 ];
 
+export const defaultReservationHoldHours = 24;
+export const reservationHoldPrefix = "__reservation_hold_hours:";
+
+export function getReservationHoldHours(values: unknown) {
+  if (!Array.isArray(values)) return defaultReservationHoldHours;
+  const marker = values.map(String).find((value) => value.startsWith(reservationHoldPrefix));
+  const hours = Number(marker?.slice(reservationHoldPrefix.length));
+  return Number.isFinite(hours) && hours > 0 ? hours : defaultReservationHoldHours;
+}
+
 export const defaultCategories: CottageCategory[] = [
   { id: "cove", name: "Cove cottages", description: "Cove 1 to 45 - Php700/day", sortOrder: 10 },
   { id: "rock", name: "Rock cottages", description: "Rock 1 to 6 - Php800/day", sortOrder: 20 },
@@ -108,6 +118,7 @@ function createCottage(type: NumberedCottageType, number: number): Room {
     gallery: cottageGallery,
     amenities: detail.amenities,
     bookingIncludes: defaultBookingIncludes,
+    reservationHoldHours: defaultReservationHoldHours,
     featured: number <= (type === "cove" ? 3 : 1),
     available: true,
   };
@@ -133,6 +144,7 @@ const specialCottages: Room[] = [
     gallery: cottageGallery,
     amenities: ["Event space", "Private bath", "Outdoor seating", "Resort access"],
     bookingIncludes: ["Flexible event setup", "Private bath access", "Guest dashboard visibility after sign in"],
+    reservationHoldHours: defaultReservationHoldHours,
     featured: true,
     available: true,
   },
@@ -155,6 +167,7 @@ const specialCottages: Room[] = [
     gallery: cottageGallery,
     amenities: ["Open-air space", "Private bath", "Beach access", "Resort access"],
     bookingIncludes: ["Open-air shaded use", "Beach access", "Guest dashboard visibility after sign in"],
+    reservationHoldHours: defaultReservationHoldHours,
     featured: true,
     available: true,
   },
@@ -219,8 +232,9 @@ export function normalizeRoom(row: Room | Record<string, unknown>, categories = 
       ? source.amenities.map(String)
       : normalizedAmenities || [],
     bookingIncludes: Array.isArray(includesValue)
-      ? includesValue.map(String)
+      ? includesValue.map(String).filter((value) => !value.startsWith(reservationHoldPrefix))
       : defaultBookingIncludes,
+    reservationHoldHours: Number(source.reservationHoldHours) || getReservationHoldHours(includesValue),
     featured: Boolean(source.featured ?? source.is_featured ?? false),
     available: Boolean(source.available ?? source.is_active ?? true),
   };

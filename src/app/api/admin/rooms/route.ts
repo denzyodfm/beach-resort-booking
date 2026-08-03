@@ -1,5 +1,5 @@
 import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
-import { defaultCategories, normalizeCategory, normalizeRoom, rooms } from "@/lib/resort-data";
+import { defaultCategories, normalizeCategory, normalizeRoom, reservationHoldPrefix, rooms } from "@/lib/resort-data";
 
 export async function GET() {
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -87,6 +87,10 @@ function toRoomRow(body: Record<string, unknown>) {
   const categoryId = String(body.categoryId || body.category_id || body.type || "cove");
   const id = String(body.id || `cottage_${categoryId}_${Date.now()}`);
   const size = String(body.size || "");
+  const rawIncludes = body.bookingIncludes || body.booking_includes;
+  const bookingIncludes = Array.isArray(rawIncludes)
+    ? rawIncludes.map(String).filter((value) => !value.startsWith(reservationHoldPrefix))
+    : [];
 
   return {
     id,
@@ -104,9 +108,10 @@ function toRoomRow(body: Record<string, unknown>) {
     is_active: Boolean(body.available ?? body.is_active ?? true),
     is_featured: Boolean(body.featured ?? body.is_featured ?? false),
     sort_order: Number(body.sortOrder ?? body.sort_order ?? 0),
-    booking_includes: Array.isArray(body.bookingIncludes || body.booking_includes)
-      ? (body.bookingIncludes || body.booking_includes)
-      : [],
+    booking_includes: [
+      ...bookingIncludes,
+      `${reservationHoldPrefix}${Math.max(1, Number(body.reservationHoldHours) || 24)}`,
+    ],
     image: String(body.image || ""),
     amenities: Array.isArray(body.amenities) ? body.amenities.map(String) : [],
   };

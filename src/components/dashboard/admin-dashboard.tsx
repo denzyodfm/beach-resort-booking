@@ -1780,6 +1780,7 @@ function CottageManagement({
       gallery: selected?.gallery || [],
       amenities: [],
       bookingIncludes: ["Guest dashboard visibility after sign in"],
+      reservationHoldHours: 24,
       available: true,
     };
 
@@ -1969,6 +1970,12 @@ function CottageManagement({
             type="number"
             value={String(selected.maxGuests)}
             onChange={(value) => updateSelected({ maxGuests: Number(value) || 1 })}
+          />
+          <EditField
+            label="Reservation hold (hours)"
+            type="number"
+            value={String(selected.reservationHoldHours || 24)}
+            onChange={(value) => updateSelected({ reservationHoldHours: Math.max(1, Number(value) || 24) })}
           />
           <EditField label="Size" value={selected.size} onChange={(size) => updateSelected({ size })} />
           <div className="sm:col-span-2">

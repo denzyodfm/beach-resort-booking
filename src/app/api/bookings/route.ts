@@ -14,8 +14,10 @@ import { findBlockedBookingDate } from "@/lib/booking-blocked-dates";
 import { getBookingBlockedDates } from "@/lib/booking-blocked-dates-server";
 import { sendBookingConfirmationEmail } from "@/lib/email";
 import { sendBookingConfirmationSms } from "@/lib/sms";
+import { expireUnpaidReservations } from "@/lib/reservation-expiry";
 
 export async function GET() {
+  await expireUnpaidReservations();
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json(getServerDemoBookings());
   }
@@ -32,6 +34,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  await expireUnpaidReservations();
   const body = (await request.json()) as {
     roomId: string;
     guestName: string;
@@ -124,10 +127,13 @@ export async function POST(request: Request) {
     checkOut: body.checkOut,
     totalAmount: total,
   });
+  const holdHours = room.reservationHoldHours || 24;
+  const holdExpiresAt = new Date(new Date(data.created_at).getTime() + holdHours * 60 * 60 * 1000).toISOString();
 
   return Response.json(
     {
       booking: data,
+      holdExpiresAt,
       message: `${buildBookingConfirmationMessage({
         id: data.booking_number || data.id,
         roomName: room.name,
@@ -137,7 +143,7 @@ export async function POST(request: Request) {
         checkIn: body.checkIn,
         checkOut: body.checkOut,
         totalPrice: total,
-      })} ${email.sent ? `Confirmation email sent to ${body.guestEmail}.` : email.reason} ${
+      })} Payment must be recorded within ${holdHours} hours (before ${holdExpiresAt}); otherwise this reservation will be cancelled automatically. ${email.sent ? `Confirmation email sent to ${body.guestEmail}.` : email.reason} ${
         sms.sent ? `Confirmation SMS sent to ${body.guestPhone}.` : sms.reason
       }`,
     },

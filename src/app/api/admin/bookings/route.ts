@@ -2,8 +2,10 @@ import { createAdminClient, createClientServer, hasSupabaseEnv } from "@/lib/sup
 import { getServerDemoBookings, updateServerDemoBooking } from "@/lib/demo-booking-store";
 import { isPaidEnoughToConfirm } from "@/lib/booking-logic";
 import type { Booking, BookingStatus, PaymentLog, PaymentStatus } from "@/lib/types";
+import { expireUnpaidReservations } from "@/lib/reservation-expiry";
 
 export async function GET() {
+  await expireUnpaidReservations();
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json(getServerDemoBookings());
   }

@@ -308,6 +308,9 @@ export function DateCottageBooking({
 
     return (
       <form onSubmit={submitBooking} className="grid gap-4">
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+          This cottage will be held for {selectedRoom.reservationHoldHours || 24} hours after booking. If payment is not recorded before the hold expires, the reservation is cancelled automatically and the cottage becomes available again.
+        </p>
         <Field
           id={`${prefix}-guest-name`}
           label="Guest name"
