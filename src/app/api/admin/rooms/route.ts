@@ -1,5 +1,5 @@
 import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
-import { defaultCategories, normalizeCategory, normalizeRoom, premiumFeePrefix, reservationFeePrefix, reservationHoldPrefix, rooms } from "@/lib/resort-data";
+import { defaultCategories, normalizeCategory, normalizeRoom, onlineReservablePrefix, premiumFeePrefix, reservationFeePrefix, reservationHoldPrefix, rooms } from "@/lib/resort-data";
 
 export async function GET() {
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -90,7 +90,7 @@ function toRoomRow(body: Record<string, unknown>) {
   const rawIncludes = body.bookingIncludes || body.booking_includes;
   const bookingIncludes = Array.isArray(rawIncludes)
     ? rawIncludes.map(String).filter((value) =>
-        ![reservationHoldPrefix, premiumFeePrefix, reservationFeePrefix].some((prefix) => value.startsWith(prefix)),
+        ![reservationHoldPrefix, premiumFeePrefix, reservationFeePrefix, onlineReservablePrefix].some((prefix) => value.startsWith(prefix)),
       )
     : [];
 
@@ -113,6 +113,7 @@ function toRoomRow(body: Record<string, unknown>) {
     booking_includes: [
       ...bookingIncludes,
       `${reservationHoldPrefix}${Math.max(1, Number(body.reservationHoldHours) || 24)}`,
+      `${onlineReservablePrefix}${body.onlineReservable !== false}`,
       ...(Boolean(body.premiumFeeEnabled) && Number(body.premiumFeeAmount) > 0
         ? [`${premiumFeePrefix}${Number(body.premiumFeeAmount)}`]
         : []),

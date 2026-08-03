@@ -30,6 +30,7 @@ export type Room = {
   premiumFeeAmount?: number;
   reservationFeeEnabled?: boolean;
   reservationFeeAmount?: number;
+  onlineReservable?: boolean;
   featured?: boolean;
   available?: boolean;
 };

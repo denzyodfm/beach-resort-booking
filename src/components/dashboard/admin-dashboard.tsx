@@ -48,6 +48,7 @@ type CottageCatalogResponse = {
   rooms: Room[];
   categories: CottageCategory[];
 };
+type AdminTab = "overview" | "bookings" | "payments" | "cottages" | "reviews" | "settings";
 
 const defaultAmenityOptions = [
   "Air conditioning",
@@ -187,6 +188,7 @@ export function AdminDashboard() {
   const [cottages, setCottages] = useState(rooms);
   const [categories, setCategories] = useState<CottageCategory[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
 
   useEffect(() => {
     const supabaseConfigured = hasSupabaseEnv();
@@ -384,43 +386,51 @@ export function AdminDashboard() {
 
   return (
     <div className="grid gap-6">
-      <HeroSummary totalRevenue={stats.revenue} upcomingCount={stats.upcoming.length} />
+      <nav aria-label="Admin sections" className="sticky top-[112px] z-30 flex gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur">
+        {([
+          ["overview", "Overview"],
+          ["bookings", "Bookings"],
+          ["payments", "Payments"],
+          ["cottages", "Cottages"],
+          ["reviews", "Reviews"],
+          ...(user?.role === "admin" ? [["settings", "Users & settings"]] : []),
+        ] as Array<[AdminTab, string]>).map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setActiveTab(id)} className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-bold transition ${activeTab === id ? "bg-bolihon-green text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+            {label}
+          </button>
+        ))}
+      </nav>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total bookings" value={stats.total.toString()} detail="All active requests" tone="cyan" />
-        <StatCard label="Pending bookings" value={stats.pending.toString()} detail="Need approval" tone="amber" />
-        <StatCard label="Confirmed bookings" value={stats.confirmed.toString()} detail="Arrivals scheduled" tone="emerald" />
-        <StatCard label="Total revenue" value={formatPeso(stats.revenue)} detail="Paid and deposits" tone="coral" />
-      </section>
+      {activeTab === "overview" ? <>
+        <HeroSummary totalRevenue={stats.revenue} upcomingCount={stats.upcoming.length} />
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Total bookings" value={stats.total.toString()} detail="All active requests" tone="cyan" />
+          <StatCard label="Pending bookings" value={stats.pending.toString()} detail="Need approval" tone="amber" />
+          <StatCard label="Confirmed bookings" value={stats.confirmed.toString()} detail="Arrivals scheduled" tone="emerald" />
+          <StatCard label="Total revenue" value={formatPeso(stats.revenue)} detail="Paid and deposits" tone="coral" />
+        </section>
+      </> : null}
 
-      {user?.role === "admin" ? <UserAdministration /> : null}
-
-      {user?.role === "admin" ? <AutoReplyKnowledgeManager /> : null}
-
-      <HolidayDateManagement />
-
-      <section className="grid gap-6">
+      {activeTab === "bookings" ? <>
+        <HolidayDateManagement />
         <CalendarView bookings={bookings} />
-      </section>
-
-      <section className="grid gap-6">
         <BookingQueue bookings={bookings} onAction={updateBooking} />
-      </section>
+      </> : null}
 
-      <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+      {activeTab === "payments" ? <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <UpcomingCheckIns bookings={stats.upcoming} />
         <RecentPayments bookings={bookings} onAction={updatePayment} />
-      </section>
+      </section> : null}
 
-      <ReviewModeration reviews={reviews} onUpdate={setReviews} />
-      <CottageManagement
-        cottages={cottages}
-        categories={categories}
-        onUpdate={setCottages}
-        onCategoriesUpdate={setCategories}
-        onReload={loadCatalog}
-      />
-      <RoomAvailability cottages={cottages} bookings={bookings} />
+      {activeTab === "reviews" ? <ReviewModeration reviews={reviews} onUpdate={setReviews} /> : null}
+      {activeTab === "cottages" ? <>
+        <CottageManagement cottages={cottages} categories={categories} onUpdate={setCottages} onCategoriesUpdate={setCategories} onReload={loadCatalog} />
+        <RoomAvailability cottages={cottages} bookings={bookings} />
+      </> : null}
+      {activeTab === "settings" && user?.role === "admin" ? <>
+        <UserAdministration />
+        <AutoReplyKnowledgeManager />
+      </> : null}
     </div>
   );
 }
@@ -1785,6 +1795,7 @@ function CottageManagement({
       premiumFeeAmount: 0,
       reservationFeeEnabled: false,
       reservationFeeAmount: 0,
+      onlineReservable: true,
       available: true,
     };
 
@@ -1981,6 +1992,15 @@ function CottageManagement({
             value={String(selected.reservationHoldHours || 24)}
             onChange={(value) => updateSelected({ reservationHoldHours: Math.max(1, Number(value) || 24) })}
           />
+          <label className="flex items-start gap-3 rounded-md border border-cyan-200 bg-cyan-50 px-3 py-3 text-sm font-semibold text-cyan-950">
+            <input
+              type="checkbox"
+              checked={selected.onlineReservable ?? true}
+              onChange={(event) => updateSelected({ onlineReservable: event.target.checked })}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>Designated for online reservations <span className="mt-1 block text-xs font-normal text-cyan-800">Uncheck to reserve this cottage for walk-in bookings.</span></span>
+          </label>
           <div className="rounded-md border border-slate-200 p-3">
             <label className="flex items-center gap-3 text-sm font-semibold text-slate-700">
               <input

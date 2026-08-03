@@ -18,6 +18,7 @@ export function SiteHeader() {
     ...(canManageResort(user?.role)
       ? [
           { href: "/monitoring", label: "Monitoring Station" },
+          { href: "/location-map", label: "Location Map" },
           { href: "/admin", label: "Admin" },
         ]
       : []),

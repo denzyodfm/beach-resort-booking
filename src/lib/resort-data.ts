@@ -24,6 +24,13 @@ export const defaultReservationHoldHours = 24;
 export const reservationHoldPrefix = "__reservation_hold_hours:";
 export const premiumFeePrefix = "__premium_fee:";
 export const reservationFeePrefix = "__reservation_fee:";
+export const onlineReservablePrefix = "__online_reservable:";
+
+export function getOnlineReservable(values: unknown) {
+  if (!Array.isArray(values)) return true;
+  const marker = values.map(String).find((value) => value.startsWith(onlineReservablePrefix));
+  return marker ? marker.slice(onlineReservablePrefix.length) !== "false" : true;
+}
 
 export function getReservationHoldHours(values: unknown) {
   if (!Array.isArray(values)) return defaultReservationHoldHours;
@@ -252,7 +259,7 @@ export function normalizeRoom(row: Room | Record<string, unknown>, categories = 
       : normalizedAmenities || [],
     bookingIncludes: Array.isArray(includesValue)
       ? includesValue.map(String).filter((value) =>
-          ![reservationHoldPrefix, premiumFeePrefix, reservationFeePrefix].some((prefix) => value.startsWith(prefix)),
+          ![reservationHoldPrefix, premiumFeePrefix, reservationFeePrefix, onlineReservablePrefix].some((prefix) => value.startsWith(prefix)),
         )
       : defaultBookingIncludes,
     reservationHoldHours: Number(source.reservationHoldHours) || getReservationHoldHours(includesValue),
@@ -260,6 +267,7 @@ export function normalizeRoom(row: Room | Record<string, unknown>, categories = 
     premiumFeeAmount: Number(source.premiumFeeAmount) || chargeSettings.premiumFeeAmount,
     reservationFeeEnabled: source.reservationFeeEnabled === undefined ? chargeSettings.reservationFeeEnabled : Boolean(source.reservationFeeEnabled),
     reservationFeeAmount: Number(source.reservationFeeAmount) || chargeSettings.reservationFeeAmount,
+    onlineReservable: source.onlineReservable === undefined ? getOnlineReservable(includesValue) : Boolean(source.onlineReservable),
     featured: Boolean(source.featured ?? source.is_featured ?? false),
     available: Boolean(source.available ?? source.is_active ?? true),
   };
