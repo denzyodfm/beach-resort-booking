@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { findBlockedBookingDate, type BookingBlockedDate } from "@/lib/booking-blocked-dates";
 import { findBookingConflict, dateRangesOverlap } from "@/lib/booking-logic";
 import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
@@ -77,6 +77,7 @@ export function DateCottageBooking({
   });
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const bookingDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -214,6 +215,14 @@ export function DateCottageBooking({
     setSelectedDay(day);
     setSelectedRoomId(room.id);
     setMessage("");
+    window.requestAnimationFrame(() => {
+      if (window.matchMedia("(min-width: 768px)").matches) {
+        bookingDialogRef.current?.showModal();
+        window.requestAnimationFrame(() => document.getElementById("dialog-guest-name")?.focus());
+      } else {
+        document.getElementById("mobile-guest-name")?.focus();
+      }
+    });
   }
 
   async function submitBooking(event: React.FormEvent<HTMLFormElement>) {
@@ -286,11 +295,63 @@ export function DateCottageBooking({
 
       setMessage(result.message || `${selectedRoom.name} is held as a pending booking for ${effectiveDay}.`);
       setSelectedRoomId("");
+      bookingDialogRef.current?.close();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to save booking.");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function renderBookingForm(prefix: string) {
+    if (!selectedRoom) return null;
+
+    return (
+      <form onSubmit={submitBooking} className="grid gap-4">
+        <Field
+          id={`${prefix}-guest-name`}
+          label="Guest name"
+          value={form.guestName}
+          onChange={(guestName) => setForm((current) => ({ ...current, guestName }))}
+        />
+        <Field
+          id={`${prefix}-guest-phone`}
+          label="Cellphone no."
+          type="tel"
+          value={form.guestPhone}
+          onChange={(guestPhone) => setForm((current) => ({ ...current, guestPhone }))}
+        />
+        <Field
+          id={`${prefix}-guest-email`}
+          label="Email (optional)"
+          type="email"
+          required={false}
+          value={form.guestEmail}
+          onChange={(guestEmail) => setForm((current) => ({ ...current, guestEmail }))}
+        />
+        <div>
+          <label htmlFor={`${prefix}-guests`} className="text-sm font-semibold text-slate-700">
+            Guests
+          </label>
+          <input
+            id={`${prefix}-guests`}
+            type="number"
+            min={1}
+            max={selectedRoom.maxGuests}
+            value={form.guests}
+            onChange={(event) => setForm((current) => ({ ...current, guests: Number(event.target.value) }))}
+            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={submitting || blockedDate.blocked || form.guests < 1 || form.guests > selectedRoom.maxGuests || !form.guestPhone.trim()}
+          className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {submitting ? "Holding..." : "Hold this cottage"}
+        </button>
+      </form>
+    );
   }
 
   return (
@@ -379,7 +440,7 @@ export function DateCottageBooking({
                 {/* Header: days */}
                 <div className="sticky top-0 z-20 border-b border-slate-300 bg-white px-2 py-3 shadow-sm">
                   <div className="grid items-center gap-1" style={calendarGridStyle}>
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 px-3 text-xs font-semibold">
+                    <div className="sticky left-0 z-30 grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-r border-slate-200 bg-white px-3 py-0.5 text-xs font-semibold shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">
                       <span>Cottage</span>
                       <span>Rate</span>
                     </div>
@@ -390,7 +451,7 @@ export function DateCottageBooking({
                     ))}
                   </div>
                   <div className="mt-1 grid items-center gap-1" style={calendarGridStyle}>
-                    <div className="px-3 text-xs font-semibold text-slate-500">Day</div>
+                    <div className="sticky left-0 z-30 border-r border-slate-200 bg-white px-3 py-0.5 text-xs font-semibold text-slate-500 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">Day</div>
                     {weekdayLabels.map((label, index) => (
                       <div
                         key={`${monthDays[index]}-weekday`}
@@ -406,7 +467,7 @@ export function DateCottageBooking({
                 <div>
                   {visibleRooms.map((room) => (
                     <div key={room.id} className="grid items-center gap-1 border-t px-2 py-2" style={calendarGridStyle}>
-                      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3">
+                      <div className="sticky left-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 self-stretch border-r border-slate-200 bg-white px-3 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">
                         <div className="text-sm font-semibold leading-snug text-slate-900">{room.name}</div>
                         <div className="whitespace-nowrap text-xs font-medium text-slate-500">{formatPeso(room.pricePerNight)}</div>
                       </div>
@@ -444,7 +505,7 @@ export function DateCottageBooking({
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-5">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-5 md:hidden">
               <div className="mb-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center">
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-700">Booking details</p>
@@ -479,43 +540,33 @@ export function DateCottageBooking({
                 </div>
               </div>
 
-              {selectedRoom ? (
-                <form onSubmit={submitBooking} className="grid gap-4">
-                  <Field label="Guest name" value={form.guestName} onChange={(guestName) => setForm((current) => ({ ...current, guestName }))} />
-                  <Field label="Cellphone no." type="tel" value={form.guestPhone} onChange={(guestPhone) => setForm((current) => ({ ...current, guestPhone }))} />
-                  <Field
-                    label="Email (optional)"
-                    type="email"
-                    required={false}
-                    value={form.guestEmail}
-                    onChange={(guestEmail) => setForm((current) => ({ ...current, guestEmail }))}
-                  />
-                  <div>
-                    <label htmlFor="date-guests" className="text-sm font-semibold text-slate-700">
-                      Guests
-                    </label>
-                    <input
-                      id="date-guests"
-                      type="number"
-                      min={1}
-                      max={selectedRoom.maxGuests}
-                      value={form.guests}
-                      onChange={(event) => setForm((current) => ({ ...current, guests: Number(event.target.value) }))}
-                      className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={submitting || blockedDate.blocked || form.guests < 1 || form.guests > selectedRoom.maxGuests || !form.guestPhone.trim()}
-                    className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
-                  >
-                    {submitting ? "Holding..." : "Hold this cottage"}
-                  </button>
-                </form>
-              ) : null}
+              {selectedRoom ? renderBookingForm("mobile") : null}
 
               {message ? <p className="mt-4 rounded-md bg-cyan-50 px-4 py-3 text-sm text-cyan-900">{message}</p> : null}
             </div>
+
+            <dialog
+              ref={bookingDialogRef}
+              className="m-auto w-[min(34rem,calc(100%-2rem))] rounded-xl border border-slate-200 bg-white p-0 shadow-2xl backdrop:bg-slate-950/55"
+              onClose={() => setMessage("")}
+            >
+              {selectedRoom ? (
+                <div className="p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">Booking details</p>
+                      <h2 className="mt-1 text-2xl font-bold text-slate-950">{selectedRoom.name}</h2>
+                      <p className="mt-1 text-sm text-slate-600">{effectiveDay} · {formatPeso(total)}</p>
+                    </div>
+                    <button type="button" onClick={() => bookingDialogRef.current?.close()} className="rounded-full border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                      Close
+                    </button>
+                  </div>
+                  <div className="mt-5">{renderBookingForm("dialog")}</div>
+                  {message ? <p className="mt-4 rounded-md bg-cyan-50 px-4 py-3 text-sm text-cyan-900">{message}</p> : null}
+                </div>
+              ) : null}
+            </dialog>
           </section>
         ) : (
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
@@ -528,27 +579,29 @@ export function DateCottageBooking({
 }
 
 function Field({
+  id,
   label,
   type = "text",
   value,
   required = true,
   onChange,
 }: {
+  id?: string;
   label: string;
   type?: string;
   value: string;
   required?: boolean;
   onChange: (value: string) => void;
 }) {
-  const id = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const fieldId = id || label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   return (
     <div>
-      <label htmlFor={id} className="text-sm font-semibold text-slate-700">
+      <label htmlFor={fieldId} className="text-sm font-semibold text-slate-700">
         {label}
       </label>
       <input
-        id={id}
+        id={fieldId}
         type={type}
         required={required}
         value={value}
