@@ -134,7 +134,10 @@ export function DateCottageBooking({
 
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId);
   const effectiveDay = selectedDay || bookingDate;
-  const total = selectedRoom ? selectedRoom.pricePerNight * nightsBetween(effectiveDay, effectiveDay) : 0;
+  const cottageFee = selectedRoom ? selectedRoom.pricePerNight * nightsBetween(effectiveDay, effectiveDay) : 0;
+  const premiumFee = selectedRoom?.premiumFeeEnabled ? selectedRoom.premiumFeeAmount || 0 : 0;
+  const reservationFee = selectedRoom?.reservationFeeEnabled ? selectedRoom.reservationFeeAmount || 0 : 0;
+  const total = cottageFee + premiumFee + reservationFee;
   const blockedDate = findBlockedBookingDate(effectiveDay, effectiveDay, blockedDates);
   const selectedCategory = categoryOptions.find((category) => category.id === selectedCategoryId) || categoryOptions[0];
   const visibleRooms = useMemo(
@@ -277,7 +280,7 @@ export function DateCottageBooking({
       if (!supabaseConfigured) {
         const source = (result.booking || {}) as Record<string, unknown>;
         saveDemoBooking({
-          id: String(source.id || source.booking_number || `DEMO-${Date.now()}`),
+          id: String(source.id || source.booking_number || `DEMO-${window.crypto.randomUUID()}`),
           roomId: selectedRoom.id,
           roomName: selectedRoom.name,
           guestName: form.guestName,
@@ -311,6 +314,12 @@ export function DateCottageBooking({
         <p className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
           This cottage will be held for {selectedRoom.reservationHoldHours || 24} hours after booking. If payment is not recorded before the hold expires, the reservation is cancelled automatically and the cottage becomes available again.
         </p>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
+          <div className="flex justify-between gap-4"><span>Cottage fee</span><strong>{formatPeso(cottageFee)}</strong></div>
+          {premiumFee > 0 ? <div className="mt-2 flex justify-between gap-4"><span>Premium charge</span><strong>{formatPeso(premiumFee)}</strong></div> : null}
+          {reservationFee > 0 ? <div className="mt-2 flex justify-between gap-4"><span>Reservation/service fee</span><strong>{formatPeso(reservationFee)}</strong></div> : null}
+          <div className="mt-3 flex justify-between gap-4 border-t border-slate-300 pt-3 text-base"><strong>Total</strong><strong>{formatPeso(total)}</strong></div>
+        </div>
         <Field
           id={`${prefix}-guest-name`}
           label="Guest name"

@@ -77,10 +77,13 @@ export function BookingForm({
   const datesAreValid = Boolean(normalizedCheckIn && normalizedCheckOut);
   const nights = datesAreValid ? nightsBetween(normalizedCheckIn, normalizedCheckOut) : 0;
   const blockedDate = datesAreValid ? findBlockedBookingDate(normalizedCheckIn, normalizedCheckOut, blockedDates) : { blocked: false, reason: "" };
-  const total = useMemo(
+  const cottageFee = useMemo(
     () => (selectedRoom ? selectedRoom.pricePerNight * nights : 0),
     [nights, selectedRoom],
   );
+  const premiumFee = selectedRoom?.premiumFeeEnabled ? selectedRoom.premiumFeeAmount || 0 : 0;
+  const reservationFee = selectedRoom?.reservationFeeEnabled ? selectedRoom.reservationFeeAmount || 0 : 0;
+  const total = cottageFee + premiumFee + reservationFee;
 
   const mergeUnavailableRanges = useCallback((apiRanges: UnavailableRange[] = []) => {
     const localRanges = supabaseConfigured ? [] : getUnavailableRanges(getDemoBookings(), roomId);
@@ -168,7 +171,7 @@ export function BookingForm({
     if (response.ok && selectedRoom && !supabaseConfigured) {
       const source = (result.booking || {}) as Record<string, unknown>;
       saveDemoBooking({
-        id: String(source.id || source.booking_number || result.id || `DEMO-${Date.now()}`),
+        id: String(source.id || source.booking_number || result.id || `DEMO-${window.crypto.randomUUID()}`),
         roomId: String(source.roomId || source.room_id || roomId),
         roomName: String((source.rooms as { name?: string } | undefined)?.name || source.roomName || selectedRoom.name),
         guestName: String(source.guestName || source.guest_name || guestName),
@@ -358,6 +361,8 @@ export function BookingForm({
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-800">Total</p>
           <p className="mt-1 text-2xl font-bold text-slate-950">Php{total.toLocaleString()}</p>
           <p className="text-sm text-slate-600">{nights} day{nights === 1 ? "" : "s"}</p>
+          {premiumFee > 0 ? <p className="mt-1 text-xs text-slate-600">Includes Php{premiumFee.toLocaleString()} premium charge</p> : null}
+          {reservationFee > 0 ? <p className="text-xs text-slate-600">Includes Php{reservationFee.toLocaleString()} reservation fee</p> : null}
         </div>
       </div>
 

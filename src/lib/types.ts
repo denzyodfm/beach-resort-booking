@@ -26,6 +26,10 @@ export type Room = {
   amenities: string[];
   bookingIncludes: string[];
   reservationHoldHours: number;
+  premiumFeeEnabled?: boolean;
+  premiumFeeAmount?: number;
+  reservationFeeEnabled?: boolean;
+  reservationFeeAmount?: number;
   featured?: boolean;
   available?: boolean;
 };

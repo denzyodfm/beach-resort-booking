@@ -1781,6 +1781,10 @@ function CottageManagement({
       amenities: [],
       bookingIncludes: ["Guest dashboard visibility after sign in"],
       reservationHoldHours: 24,
+      premiumFeeEnabled: false,
+      premiumFeeAmount: 0,
+      reservationFeeEnabled: false,
+      reservationFeeAmount: 0,
       available: true,
     };
 
@@ -1977,6 +1981,48 @@ function CottageManagement({
             value={String(selected.reservationHoldHours || 24)}
             onChange={(value) => updateSelected({ reservationHoldHours: Math.max(1, Number(value) || 24) })}
           />
+          <div className="rounded-md border border-slate-200 p-3">
+            <label className="flex items-center gap-3 text-sm font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={selected.premiumFeeEnabled ?? false}
+                onChange={(event) => updateSelected({ premiumFeeEnabled: event.target.checked })}
+                className="h-4 w-4"
+              />
+              Add premium charge
+            </label>
+            {selected.premiumFeeEnabled ? (
+              <div className="mt-3">
+                <EditField
+                  label="Premium amount"
+                  type="number"
+                  value={String(selected.premiumFeeAmount || 0)}
+                  onChange={(value) => updateSelected({ premiumFeeAmount: Math.max(0, Number(value) || 0) })}
+                />
+              </div>
+            ) : null}
+          </div>
+          <div className="rounded-md border border-slate-200 p-3">
+            <label className="flex items-center gap-3 text-sm font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={selected.reservationFeeEnabled ?? false}
+                onChange={(event) => updateSelected({ reservationFeeEnabled: event.target.checked })}
+                className="h-4 w-4"
+              />
+              Add reservation/service fee
+            </label>
+            {selected.reservationFeeEnabled ? (
+              <div className="mt-3">
+                <EditField
+                  label="Reservation fee amount"
+                  type="number"
+                  value={String(selected.reservationFeeAmount || 0)}
+                  onChange={(value) => updateSelected({ reservationFeeAmount: Math.max(0, Number(value) || 0) })}
+                />
+              </div>
+            ) : null}
+          </div>
           <EditField label="Size" value={selected.size} onChange={(size) => updateSelected({ size })} />
           <div className="sm:col-span-2">
             <EditField label="Image URL" value={selected.image} onChange={(image) => updateSelected({ image })} />

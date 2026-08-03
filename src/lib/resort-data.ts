@@ -22,12 +22,30 @@ export const defaultBookingIncludes = [
 
 export const defaultReservationHoldHours = 24;
 export const reservationHoldPrefix = "__reservation_hold_hours:";
+export const premiumFeePrefix = "__premium_fee:";
+export const reservationFeePrefix = "__reservation_fee:";
 
 export function getReservationHoldHours(values: unknown) {
   if (!Array.isArray(values)) return defaultReservationHoldHours;
   const marker = values.map(String).find((value) => value.startsWith(reservationHoldPrefix));
   const hours = Number(marker?.slice(reservationHoldPrefix.length));
   return Number.isFinite(hours) && hours > 0 ? hours : defaultReservationHoldHours;
+}
+
+export function getBookingChargeSettings(values: unknown) {
+  const entries = Array.isArray(values) ? values.map(String) : [];
+  const readAmount = (prefix: string) => {
+    const amount = Number(entries.find((value) => value.startsWith(prefix))?.slice(prefix.length));
+    return Number.isFinite(amount) && amount > 0 ? amount : 0;
+  };
+  const premiumFeeAmount = readAmount(premiumFeePrefix);
+  const reservationFeeAmount = readAmount(reservationFeePrefix);
+  return {
+    premiumFeeEnabled: premiumFeeAmount > 0,
+    premiumFeeAmount,
+    reservationFeeEnabled: reservationFeeAmount > 0,
+    reservationFeeAmount,
+  };
 }
 
 export const defaultCategories: CottageCategory[] = [
@@ -210,6 +228,7 @@ export function normalizeRoom(row: Room | Record<string, unknown>, categories = 
           .filter(Boolean) as string[] | undefined;
   const nestedAmenities = source.room_amenities as Array<{ amenities?: { name?: string } }> | undefined;
   const includesValue = source.bookingIncludes || source.booking_includes;
+  const chargeSettings = getBookingChargeSettings(includesValue);
   const normalizedAmenities = nestedAmenities?.map((item) => item.amenities?.name).filter(Boolean) as string[] | undefined;
 
   return {
@@ -232,9 +251,15 @@ export function normalizeRoom(row: Room | Record<string, unknown>, categories = 
       ? source.amenities.map(String)
       : normalizedAmenities || [],
     bookingIncludes: Array.isArray(includesValue)
-      ? includesValue.map(String).filter((value) => !value.startsWith(reservationHoldPrefix))
+      ? includesValue.map(String).filter((value) =>
+          ![reservationHoldPrefix, premiumFeePrefix, reservationFeePrefix].some((prefix) => value.startsWith(prefix)),
+        )
       : defaultBookingIncludes,
     reservationHoldHours: Number(source.reservationHoldHours) || getReservationHoldHours(includesValue),
+    premiumFeeEnabled: source.premiumFeeEnabled === undefined ? chargeSettings.premiumFeeEnabled : Boolean(source.premiumFeeEnabled),
+    premiumFeeAmount: Number(source.premiumFeeAmount) || chargeSettings.premiumFeeAmount,
+    reservationFeeEnabled: source.reservationFeeEnabled === undefined ? chargeSettings.reservationFeeEnabled : Boolean(source.reservationFeeEnabled),
+    reservationFeeAmount: Number(source.reservationFeeAmount) || chargeSettings.reservationFeeAmount,
     featured: Boolean(source.featured ?? source.is_featured ?? false),
     available: Boolean(source.available ?? source.is_active ?? true),
   };

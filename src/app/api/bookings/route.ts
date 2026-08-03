@@ -48,9 +48,12 @@ export async function POST(request: Request) {
 
   const catalog = await getRoomCatalog();
   const room = catalog.rooms.find((item) => item.id === body.roomId) || getRoomById(body.roomId);
-  const { nights, subtotal, total } = room
+  const { nights, subtotal, total: cottageTotal } = room
     ? calculateTotal(room.pricePerNight, body.checkIn, body.checkOut)
     : { nights: 0, subtotal: 0, total: 0 };
+  const premiumFee = room?.premiumFeeEnabled ? room.premiumFeeAmount || 0 : 0;
+  const reservationFee = room?.reservationFeeEnabled ? room.reservationFeeAmount || 0 : 0;
+  const total = cottageTotal + premiumFee + reservationFee;
 
   if (!room || nights < 1 || body.guests < 1 || body.guests > room.maxGuests) {
     return Response.json({ message: "Review cottage, dates, and guest count." }, { status: 400 });
