@@ -15,7 +15,12 @@ export function SiteHeader() {
   const navItems = [
     ...publicNavItems,
     ...(user ? [{ href: "/dashboard", label: "Dashboard" }] : []),
-    ...(canManageResort(user?.role) ? [{ href: "/admin", label: "Admin" }] : []),
+    ...(canManageResort(user?.role)
+      ? [
+          { href: "/monitoring", label: "Monitoring Station" },
+          { href: "/admin", label: "Admin" },
+        ]
+      : []),
   ];
 
   return (
