@@ -47,11 +47,11 @@ export function SiteHeader() {
             </div>
           ) : (
             <Link
-              href="/login"
+              href="/booking-by-date"
               prefetch
               className="rounded-full bg-bolihon-green px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-bolihon-green-dark"
             >
-              Sign in
+              Book Here
             </Link>
           )}
         </div>
