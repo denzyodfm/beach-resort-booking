@@ -294,13 +294,13 @@ export function DateCottageBooking({
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-1">
-      <div className="grid gap-6">
-        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="grid gap-3 lg:grid-cols-1">
+      <div className="grid gap-3">
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <label htmlFor="booking-month" className="text-sm font-semibold text-slate-700">
             Booking month
           </label>
-          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center">
             <input
               id="booking-month"
               type="month"
@@ -313,7 +313,7 @@ export function DateCottageBooking({
                 setSelectedRoomId("");
                 setMessage("");
               }}
-              className="min-h-12 rounded-md border border-slate-300 px-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
+              className="min-h-10 rounded-md border border-slate-300 px-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
             />
             <div className="flex flex-1 flex-wrap items-center gap-2">
               <p className="text-sm text-slate-500">
@@ -337,9 +337,9 @@ export function DateCottageBooking({
           ) : null}
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm font-semibold text-slate-700">Category</p>
-          <div className="mt-3 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Category</p>
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
             {categoryOptions.map((category) => {
               const categoryRoomCount = rooms.filter((room) => room.categoryId === category.id).length;
               const selected = selectedCategory?.id === category.id;
@@ -349,7 +349,7 @@ export function DateCottageBooking({
                   key={category.id}
                   type="button"
                   onClick={() => selectCategory(category.id)}
-                  className={`h-full w-full rounded-lg border px-4 py-4 text-left transition ${
+                  className={`h-full w-full rounded-lg border px-3 py-2.5 text-left transition ${
                     selected
                       ? "border-bolihon-green bg-bolihon-green text-white shadow-sm"
                       : "border-slate-200 bg-white text-slate-700 hover:border-bolihon-green hover:text-bolihon-green"
@@ -361,9 +361,6 @@ export function DateCottageBooking({
                       {categoryRoomCount}
                     </span>
                   </div>
-                  <span className={`mt-3 block text-xs ${selected ? "text-white/80" : "text-slate-500"}`}>
-                    {categoryRoomCount} cottage{categoryRoomCount === 1 ? "" : "s"}
-                  </span>
                 </button>
               );
             })}
@@ -371,10 +368,10 @@ export function DateCottageBooking({
         </div>
 
         {selectedCategory ? (
-          <section className="grid gap-3">
-            <div>
-              <h2 className="text-xl font-bold text-slate-950">{selectedCategory.name}</h2>
-              <p className="mt-1 text-sm text-slate-500">{selectedCategory.description}</p>
+          <section className="grid gap-2">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 className="text-lg font-bold text-slate-950">{selectedCategory.name}</h2>
+              <p className="text-sm text-slate-500">{selectedCategory.description}</p>
             </div>
 
             <div className="max-h-[70vh] min-h-96 overflow-auto overscroll-contain rounded border bg-white [scrollbar-gutter:stable]">
