@@ -26,10 +26,10 @@ export const premiumFeePrefix = "__premium_fee:";
 export const reservationFeePrefix = "__reservation_fee:";
 export const onlineReservablePrefix = "__online_reservable:";
 
-export function getOnlineReservable(values: unknown) {
-  if (!Array.isArray(values)) return true;
+export function getOnlineReservable(values: unknown, defaultValue = true) {
+  if (!Array.isArray(values)) return defaultValue;
   const marker = values.map(String).find((value) => value.startsWith(onlineReservablePrefix));
-  return marker ? marker.slice(onlineReservablePrefix.length) !== "false" : true;
+  return marker ? marker.slice(onlineReservablePrefix.length) !== "false" : defaultValue;
 }
 
 export function getReservationHoldHours(values: unknown) {
@@ -267,7 +267,9 @@ export function normalizeRoom(row: Room | Record<string, unknown>, categories = 
     premiumFeeAmount: Number(source.premiumFeeAmount) || chargeSettings.premiumFeeAmount,
     reservationFeeEnabled: source.reservationFeeEnabled === undefined ? chargeSettings.reservationFeeEnabled : Boolean(source.reservationFeeEnabled),
     reservationFeeAmount: Number(source.reservationFeeAmount) || chargeSettings.reservationFeeAmount,
-    onlineReservable: source.onlineReservable === undefined ? getOnlineReservable(includesValue) : Boolean(source.onlineReservable),
+    onlineReservable: source.onlineReservable === undefined
+      ? getOnlineReservable(includesValue, String(source.id) !== "cottage_cove_45")
+      : Boolean(source.onlineReservable),
     featured: Boolean(source.featured ?? source.is_featured ?? false),
     available: Boolean(source.available ?? source.is_active ?? true),
   };
