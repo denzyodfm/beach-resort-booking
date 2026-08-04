@@ -145,7 +145,9 @@ export function DateCottageBooking({
   const blockedDate = findBlockedBookingDate(effectiveDay, effectiveDay, blockedDates);
   const selectedCategory = categoryOptions.find((category) => category.id === selectedCategoryId) || categoryOptions[0];
   const visibleRooms = useMemo(
-    () => rooms.filter((room) => room.categoryId === selectedCategory?.id),
+    () => rooms
+      .filter((room) => room.categoryId === selectedCategory?.id)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })),
     [rooms, selectedCategory?.id],
   );
 
