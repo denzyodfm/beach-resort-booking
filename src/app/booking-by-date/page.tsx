@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 export default async function BookingByDatePage() {
   const { rooms, categories } = await getRoomCatalog();
+  const onlineRooms = rooms.filter((room) => room.onlineReservable !== false);
   const resortToday = getResortToday();
 
   return (
@@ -18,7 +19,7 @@ export default async function BookingByDatePage() {
           admin users can see the reservation owner while guests only see the unavailable status.
         </p>
       </div>
-      <DateCottageBooking rooms={rooms} categories={categories} resortToday={resortToday} />
+      <DateCottageBooking rooms={onlineRooms} categories={categories} resortToday={resortToday} />
       <ReservationPolicies />
     </section>
   );
