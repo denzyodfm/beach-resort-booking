@@ -48,10 +48,14 @@ export function DateCottageBooking({
   rooms,
   categories,
   resortToday,
+  todayOnly = false,
+  compact = false,
 }: {
   rooms: Room[];
   categories: CottageCategory[];
   resortToday: string;
+  todayOnly?: boolean;
+  compact?: boolean;
 }) {
   const today = resortToday;
   const todayMonth = today.slice(0, 7);
@@ -179,16 +183,18 @@ export function DateCottageBooking({
     });
   }
 
-  const monthDays = useMemo(() => getMonthDays(month), [month]);
+  const monthDays = useMemo(() => (todayOnly ? [today] : getMonthDays(month)), [month, today, todayOnly]);
   const weekdayLabels = useMemo(
     () => monthDays.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(day).getDay()]),
     [monthDays],
   );
   const calendarGridStyle = useMemo(
     () => ({
-      gridTemplateColumns: `minmax(180px, 1.6fr) repeat(${monthDays.length}, minmax(24px, 1fr))`,
+      gridTemplateColumns: todayOnly
+        ? "minmax(240px, 0.9fr) minmax(220px, 1.1fr)"
+        : `minmax(180px, 1.6fr) repeat(${monthDays.length}, minmax(24px, 1fr))`,
     }),
-    [monthDays],
+    [monthDays, todayOnly],
   );
 
   function selectCategory(categoryId: string) {
@@ -367,13 +373,13 @@ export function DateCottageBooking({
   }
 
   return (
-    <div className="grid gap-3 lg:grid-cols-1">
-      <div className="grid gap-3">
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <label htmlFor="booking-month" className="text-sm font-semibold text-slate-700">
+    <div className={`grid lg:grid-cols-1 ${compact ? "gap-2" : "gap-3"}`}>
+      <div className={compact ? "grid gap-2" : "grid gap-3"}>
+        {!todayOnly ? <div className={`rounded-lg border border-slate-200 bg-white shadow-sm ${compact ? "px-3 py-2" : "px-4 py-3"}`}>
+          <label htmlFor="booking-month" className={`${compact ? "text-xs" : "text-sm"} font-semibold text-slate-700`}>
             Booking month
           </label>
-          <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className={`${compact ? "mt-1" : "mt-1.5"} flex flex-col gap-2 sm:flex-row sm:items-center`}>
             <input
               id="booking-month"
               type="month"
@@ -386,7 +392,7 @@ export function DateCottageBooking({
                 setSelectedRoomId("");
                 setMessage("");
               }}
-              className="min-h-10 rounded-md border border-slate-300 px-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
+              className={`${compact ? "min-h-8 text-sm" : "min-h-10"} rounded-md border border-slate-300 px-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2`}
             />
             <div className="flex flex-1 flex-wrap items-center gap-2">
               <p className="text-sm text-slate-500">
@@ -408,11 +414,16 @@ export function DateCottageBooking({
               {blockedDate.reason}
             </p>
           ) : null}
-        </div>
+        </div> : (
+          <div className={`rounded-lg border border-emerald-200 bg-emerald-50 shadow-sm ${compact ? "px-3 py-2" : "px-5 py-4"}`}>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Today&apos;s walk-in availability</p>
+            <p className={`${compact ? "text-sm" : "mt-1 text-lg"} font-bold text-emerald-950`}>{today}</p>
+          </div>
+        )}
 
-        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+        <div className={`rounded-lg border border-slate-200 bg-white shadow-sm ${compact ? "px-2 py-1.5" : "px-3 py-2.5"}`}>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Category</p>
-          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+          <div className={`${compact ? "mt-1 gap-1.5" : "mt-2 gap-2"} grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5`}>
             {categoryOptions.map((category) => {
               const categoryRoomCount = rooms.filter((room) => room.categoryId === category.id).length;
               const selected = selectedCategory?.id === category.id;
@@ -422,7 +433,7 @@ export function DateCottageBooking({
                   key={category.id}
                   type="button"
                   onClick={() => selectCategory(category.id)}
-                  className={`h-full w-full rounded-lg border px-3 py-2.5 text-left transition ${
+                  className={`h-full w-full rounded-lg border px-3 ${compact ? "py-1.5" : "py-2.5"} text-left transition ${
                     selected
                       ? "border-bolihon-green bg-bolihon-green text-white shadow-sm"
                       : "border-slate-200 bg-white text-slate-700 hover:border-bolihon-green hover:text-bolihon-green"
@@ -441,14 +452,14 @@ export function DateCottageBooking({
         </div>
 
         {selectedCategory ? (
-          <section className="grid gap-2">
+          <section className={`grid ${compact ? "gap-1" : "gap-2"}`}>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h2 className="text-lg font-bold text-slate-950">{selectedCategory.name}</h2>
               <p className="text-sm text-slate-500">{selectedCategory.description}</p>
             </div>
 
-            <div className="max-h-[70vh] min-h-96 overflow-auto overscroll-contain rounded border bg-white [scrollbar-gutter:stable]">
-              <div className="min-w-[1050px] w-full">
+            <div className={`${todayOnly ? "min-h-0" : "max-h-[70vh] min-h-96"} overflow-auto overscroll-contain rounded border bg-white [scrollbar-gutter:stable]`}>
+              <div className={`${todayOnly ? "min-w-[520px]" : "min-w-[1050px]"} w-full`}>
                 {/* Header: days */}
                 <div className="sticky top-0 z-20 border-b border-slate-300 bg-white px-2 py-3 shadow-sm">
                   <div className="grid items-center gap-1" style={calendarGridStyle}>
@@ -478,10 +489,10 @@ export function DateCottageBooking({
                 {/* Rows: cottages */}
                 <div>
                   {visibleRooms.map((room) => (
-                    <div key={room.id} className="grid items-center gap-1 border-t px-2 py-2" style={calendarGridStyle}>
+                    <div key={room.id} className={`grid items-center gap-2 border-t px-3 ${todayOnly ? "py-3" : "py-2"}`} style={calendarGridStyle}>
                       <div className="sticky left-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 self-stretch border-r border-slate-200 bg-white px-3 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">
-                        <div className="text-sm font-semibold leading-snug text-slate-900">{room.name}</div>
-                        <div className="whitespace-nowrap text-xs font-medium text-slate-500">{formatPeso(room.pricePerNight)}</div>
+                        <div className={`${todayOnly ? "text-lg" : "text-sm"} font-semibold leading-snug text-slate-900`}>{room.name}</div>
+                        <div className={`whitespace-nowrap ${todayOnly ? "text-sm" : "text-xs"} font-medium text-slate-500`}>{formatPeso(room.pricePerNight)}</div>
                       </div>
                       {monthDays.map((day) => {
                         const blocked = findBlockedBookingDate(day, day, blockedDates);
@@ -500,7 +511,7 @@ export function DateCottageBooking({
                             type="button"
                             disabled={disabled}
                             onClick={() => selectCell(room, day)}
-                            className={`flex h-7 w-full min-w-6 items-center justify-center rounded-sm border transition ${cellStyle}`}
+                            className={`flex w-full items-center justify-center border font-bold transition ${todayOnly ? "h-14 rounded-lg text-sm" : "h-7 min-w-6 rounded-sm"} ${cellStyle}`}
                             title={
                               hasBooking
                                 ? `${room.name} — Booked on ${day}`
@@ -508,7 +519,9 @@ export function DateCottageBooking({
                                   ? `${day} — Past date`
                                   : `${room.name} — ${day}`
                             }
-                          />
+                          >
+                            {todayOnly ? (hasBooking ? "Booked" : disabled ? "Unavailable" : "Available — Book walk-in") : null}
+                          </button>
                         );
                       })}
                     </div>

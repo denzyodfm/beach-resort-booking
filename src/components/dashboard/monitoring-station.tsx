@@ -22,7 +22,7 @@ export function MonitoringStation({
   );
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-3">
       <header className="rounded-2xl bg-slate-950 px-6 py-8 text-white shadow-sm sm:px-8">
         <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-300">Staff and admin only</p>
         <h1 className="mt-2 text-3xl font-bold sm:text-4xl">Bolihon Monitoring Station</h1>
@@ -31,7 +31,7 @@ export function MonitoringStation({
         </p>
       </header>
 
-      <div role="tablist" aria-label="Booking channel" className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-2">
+      <div role="tablist" aria-label="Booking channel" className="grid gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-2">
         {([
           ["walk-in", "Walk-in Booking", "Cottages unchecked for online reservations"],
           ["online", "Online Booking", "Cottages checked for online reservations"],
@@ -42,7 +42,7 @@ export function MonitoringStation({
             aria-selected={mode === id}
             type="button"
             onClick={() => setMode(id)}
-            className={`rounded-xl p-5 text-left transition ${mode === id ? "bg-bolihon-green text-white shadow-md" : "bg-slate-50 text-slate-900 hover:bg-slate-100"}`}
+            className={`rounded-lg px-4 py-3 text-left transition ${mode === id ? "bg-bolihon-green text-white shadow-md" : "bg-slate-50 text-slate-900 hover:bg-slate-100"}`}
           >
             <span className="flex items-center justify-between gap-3 text-lg font-bold">
               {label}
@@ -55,17 +55,17 @@ export function MonitoringStation({
         ))}
       </div>
 
-      <section className="grid gap-4">
+      <section className="grid gap-2">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">{mode} availability</p>
-          <h2 className="mt-1 text-2xl font-bold text-slate-950">
+          <h2 className="text-xl font-bold text-slate-950">
             {mode === "online" ? "Online booking cottages" : "Walk-in booking cottages"}
           </h2>
-          <p className="mt-1 text-sm text-slate-600">Choose a month and category to inspect or create a reservation.</p>
+          <p className="text-sm text-slate-600">{mode === "walk-in" ? `Showing walk-in availability for today, ${resortToday}.` : "Choose a month and category to inspect or create a reservation."}</p>
         </div>
 
         {visibleRooms.length ? (
-          <DateCottageBooking key={mode} rooms={visibleRooms} categories={categories} resortToday={resortToday} />
+          <DateCottageBooking key={mode} rooms={visibleRooms} categories={categories} resortToday={resortToday} todayOnly={mode === "walk-in"} compact />
         ) : (
           <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
             No cottages are assigned here. Use Admin → Cottages to change a cottage&apos;s online reservation designation.
