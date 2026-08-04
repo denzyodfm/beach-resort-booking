@@ -9,19 +9,22 @@ import {
 } from "@/lib/resort-data";
 import type { CottageCategory, Room } from "@/lib/types";
 
-export async function getRoomCatalog(): Promise<{ rooms: Room[]; categories: CottageCategory[] }> {
+export async function getRoomCatalog(options: { includeInactive?: boolean } = {}): Promise<{ rooms: Room[]; categories: CottageCategory[] }> {
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return { rooms: fallbackRooms, categories: defaultCategories };
   }
 
   const supabase = createAdminClient();
+  let roomsQuery = supabase
+    .from("rooms")
+    .select("*, room_images(image_url), room_amenities(amenities(name))")
+    .order("sort_order");
+
+  if (!options.includeInactive) roomsQuery = roomsQuery.eq("is_active", true);
+
   const [{ data: categoryRows, error: categoryError }, { data: roomRows, error: roomError }] = await Promise.all([
     supabase.from("room_categories").select("*").order("sort_order"),
-    supabase
-      .from("rooms")
-      .select("*, room_images(image_url), room_amenities(amenities(name))")
-      .eq("is_active", true)
-      .order("sort_order"),
+    roomsQuery,
   ]);
 
   if (categoryError || roomError) {

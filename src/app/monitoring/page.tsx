@@ -5,7 +5,7 @@ import { getRoomCatalog } from "@/lib/rooms-server";
 export const dynamic = "force-dynamic";
 
 export default async function MonitoringPage() {
-  const { rooms, categories } = await getRoomCatalog();
+  const { rooms, categories } = await getRoomCatalog({ includeInactive: true });
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">

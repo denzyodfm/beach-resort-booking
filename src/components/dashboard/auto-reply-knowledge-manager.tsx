@@ -150,6 +150,7 @@ export function AutoReplyKnowledgeManager() {
 
   async function deleteItem() {
     if (!selectedExists) return;
+    if (window.prompt("Type DELETE to permanently delete this auto-reply knowledge item.")?.trim() !== "DELETE") return;
 
     setSaving(true);
     try {

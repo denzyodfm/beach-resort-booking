@@ -114,10 +114,10 @@ function toRoomRow(body: Record<string, unknown>) {
       ...bookingIncludes,
       `${reservationHoldPrefix}${Math.max(1, Number(body.reservationHoldHours) || 24)}`,
       `${onlineReservablePrefix}${body.onlineReservable !== false}`,
-      ...(Boolean(body.premiumFeeEnabled) && Number(body.premiumFeeAmount) > 0
+      ...(body.onlineReservable !== false && Boolean(body.premiumFeeEnabled) && Number(body.premiumFeeAmount) > 0
         ? [`${premiumFeePrefix}${Number(body.premiumFeeAmount)}`]
         : []),
-      ...(Boolean(body.reservationFeeEnabled) && Number(body.reservationFeeAmount) > 0
+      ...(body.onlineReservable !== false && Boolean(body.reservationFeeEnabled) && Number(body.reservationFeeAmount) > 0
         ? [`${reservationFeePrefix}${Number(body.reservationFeeAmount)}`]
         : []),
     ],
