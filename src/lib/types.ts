@@ -54,6 +54,9 @@ export type Booking = {
   checkOut: string;
   guests: number;
   totalPrice: number;
+  cottageSubtotal?: number;
+  premiumFeeAmount?: number;
+  reservationFeeAmount?: number;
   status: BookingStatus;
   paymentStatus: PaymentStatus;
   paymentNote?: string;

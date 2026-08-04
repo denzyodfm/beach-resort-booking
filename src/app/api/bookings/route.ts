@@ -25,7 +25,7 @@ export async function GET() {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("bookings")
-    .select("*, rooms(name)")
+    .select("*, rooms(name, booking_includes)")
     .order("created_at", { ascending: false });
 
   if (error) return Response.json({ message: error.message }, { status: 500 });

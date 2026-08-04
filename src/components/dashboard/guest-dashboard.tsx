@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { canGuestCancel, cancellationWindowDays } from "@/lib/booking-logic";
+import { canGuestCancel } from "@/lib/booking-logic";
 import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
+import { getBookingChargeSettings } from "@/lib/resort-data";
 import { hasSupabaseEnv } from "@/lib/supabase-browser";
 import type { Booking } from "@/lib/types";
 
 function normalizeBooking(row: Booking | Record<string, unknown>): Booking {
   const source = row as Record<string, unknown>;
-  const room = source.rooms as { name?: string } | undefined;
+  const room = source.rooms as { name?: string; booking_includes?: unknown } | undefined;
+  const charges = getBookingChargeSettings(room?.booking_includes);
 
   return {
     id: String(source.id || source.booking_number || ""),
@@ -21,6 +23,9 @@ function normalizeBooking(row: Booking | Record<string, unknown>): Booking {
     checkOut: String(source.checkOut || source.check_out || ""),
     guests: Number(source.guests || source.guest_count || 1),
     totalPrice: Number(source.totalPrice ?? source.total_amount ?? 0),
+    cottageSubtotal: Number(source.cottageSubtotal ?? source.subtotal_amount ?? source.totalPrice ?? source.total_amount ?? 0),
+    premiumFeeAmount: Number(source.premiumFeeAmount ?? charges.premiumFeeAmount ?? 0),
+    reservationFeeAmount: Number(source.reservationFeeAmount ?? charges.reservationFeeAmount ?? 0),
     status: (source.status || "pending") as Booking["status"],
     paymentStatus: (source.paymentStatus || source.payment_status || "unpaid") as Booking["paymentStatus"],
     createdAt: String(source.createdAt || source.created_at || new Date().toISOString()).slice(0, 10),
@@ -88,14 +93,11 @@ export function GuestDashboard() {
       <div className="rounded-lg bg-cyan-950 p-6 text-white">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-100">Guest dashboard</p>
         <h1 className="mt-2 text-3xl font-bold">Your upcoming stays</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-cyan-50">
-          Free cancellation is available until {cancellationWindowDays} days before check-in.
-        </p>
       </div>
 
       {message ? <p className="rounded-md bg-cyan-50 px-4 py-3 text-sm text-cyan-900">{message}</p> : null}
 
-      <div className="grid gap-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {bookings.map((booking) => {
           const cancellation = canGuestCancel(booking.checkIn);
           const bookingWasMadeInsideFreeWindow = Boolean(cancellation.cancelBy) && booking.createdAt <= cancellation.cancelBy;
@@ -104,11 +106,9 @@ export function GuestDashboard() {
             bookingWasMadeInsideFreeWindow &&
             booking.status !== "cancelled";
           const detailsOpen = openBookingId === booking.id;
-          const cancellationText = bookingWasMadeInsideFreeWindow
-            ? `Cancel by ${cancellation.cancelBy} for free cancellation.`
-            : !cancellation.cancelBy
-              ? "Cancellation is unavailable because this booking has incomplete dates."
-            : `Free cancellation was already closed when this booking was made on ${booking.createdAt}.`;
+          const configuredCharges = (booking.premiumFeeAmount || 0) + (booking.reservationFeeAmount || 0);
+          const cottageSubtotal = Math.max(0, booking.cottageSubtotal ?? booking.totalPrice - configuredCharges);
+          const unlabelledCharges = Math.max(0, booking.totalPrice - cottageSubtotal - configuredCharges);
 
           return (
             <article
@@ -122,12 +122,12 @@ export function GuestDashboard() {
                   setOpenBookingId((current) => (current === booking.id ? "" : booking.id));
                 }
               }}
-              className="relative cursor-pointer rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition hover:border-bolihon-green hover:shadow-md focus:outline-none focus:ring-2 focus:ring-bolihon-green"
+              className="relative flex cursor-pointer flex-col rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-bolihon-green hover:shadow-md focus:outline-none focus:ring-2 focus:ring-bolihon-green"
             >
-              <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+              <div className="flex h-full flex-col justify-between gap-4">
                 <div>
-                  <p className="text-sm font-semibold text-cyan-800">{booking.id}</p>
-                  <h2 className="mt-1 text-xl font-semibold text-slate-950">{booking.roomName}</h2>
+                  <p className="truncate text-xs font-semibold text-cyan-800" title={booking.id}>{booking.id}</p>
+                  <h2 className="mt-1 text-lg font-semibold text-slate-950">{booking.roomName}</h2>
                   <p className="mt-2 text-sm font-semibold text-slate-700">
                     Guest: {booking.guestName || "Not provided"}
                   </p>
@@ -137,13 +137,14 @@ export function GuestDashboard() {
                   <p className="mt-2 text-sm text-slate-500">
                     Cellphone: {booking.guestPhone || "Not provided"}
                   </p>
-                  <p className="mt-2 text-sm text-slate-500">
-                    {cancellationText}
-                  </p>
                 </div>
-                <div className="grid gap-3 text-left lg:text-right">
-                  <div>
-                    <p className="text-2xl font-bold text-slate-950">{formatPeso(booking.totalPrice)}</p>
+                <div className="grid gap-3 border-t border-slate-100 pt-3 text-left">
+                  <div className="grid gap-1 text-sm">
+                    <div className="flex justify-between gap-3 text-slate-600"><span>Cottage charge</span><span>{formatPeso(cottageSubtotal)}</span></div>
+                    {(booking.premiumFeeAmount || 0) > 0 ? <div className="flex justify-between gap-3 text-slate-600"><span>Premium charge</span><span>{formatPeso(booking.premiumFeeAmount)}</span></div> : null}
+                    {(booking.reservationFeeAmount || 0) > 0 ? <div className="flex justify-between gap-3 text-slate-600"><span>Reservation/service fee</span><span>{formatPeso(booking.reservationFeeAmount)}</span></div> : null}
+                    {unlabelledCharges > 0 ? <div className="flex justify-between gap-3 text-slate-600"><span>Other charges</span><span>{formatPeso(unlabelledCharges)}</span></div> : null}
+                    <div className="mt-1 flex items-end justify-between gap-3 border-t border-slate-100 pt-2"><span className="font-bold text-slate-700">Amount to be paid</span><span className="text-xl font-bold text-slate-950">{formatPeso(booking.totalPrice)}</span></div>
                     <p className="mt-1 text-sm capitalize text-slate-600">
                       {booking.status} - {booking.paymentStatus.replace("_", " ")}
                     </p>
@@ -186,11 +187,10 @@ export function GuestDashboard() {
                     <DetailItem label="Check-in" value={booking.checkIn} />
                     <DetailItem label="Check-out" value={booking.checkOut} />
                     <DetailItem label="Guests" value={booking.guests.toString()} />
-                    <DetailItem label="Total" value={formatPeso(booking.totalPrice)} />
+                    <DetailItem label="Amount to be paid" value={formatPeso(booking.totalPrice)} />
                     <DetailItem label="Booking status" value={booking.status} />
                     <DetailItem label="Payment status" value={booking.paymentStatus.replace("_", " ")} />
                     <DetailItem label="Booked on" value={booking.createdAt} />
-                    <DetailItem label="Free cancellation" value={bookingWasMadeInsideFreeWindow ? `Until ${cancellation.cancelBy}` : "Closed when booked"} />
                   </dl>
                 </div>
               ) : null}
