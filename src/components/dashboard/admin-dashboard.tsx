@@ -1727,6 +1727,33 @@ function CottageManagement({
     );
   }
 
+  async function saveOnlineDesignation(onlineReservable: boolean) {
+    if (!selected || draftIds.has(selected.id)) {
+      updateSelected({ onlineReservable });
+      setMessage("Save the new cottage to store its booking designation.");
+      return;
+    }
+
+    const updatedRoom = { ...selected, onlineReservable };
+    updateSelected({ onlineReservable });
+    setMessage("Saving booking designation...");
+
+    try {
+      const response = await fetch("/api/admin/rooms", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatedRoom),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to save booking designation.");
+      setMessage(onlineReservable ? "Assigned to online booking." : "Assigned to walk-in booking.");
+      await onReload();
+    } catch (error) {
+      updateSelected({ onlineReservable: selected.onlineReservable ?? true });
+      setMessage(error instanceof Error ? error.message : "Unable to save booking designation.");
+    }
+  }
+
   function toggleAmenity(amenity: string) {
     const current = selected.amenities || [];
     updateSelected({
@@ -2021,7 +2048,7 @@ function CottageManagement({
             <input
               type="checkbox"
               checked={selected.onlineReservable ?? true}
-              onChange={(event) => updateSelected({ onlineReservable: event.target.checked })}
+              onChange={(event) => void saveOnlineDesignation(event.target.checked)}
               className="mt-0.5 h-4 w-4"
             />
             <span>Designated for online reservations <span className="mt-1 block text-xs font-normal text-cyan-800">Uncheck to reserve this cottage for walk-in bookings.</span></span>
