@@ -23,14 +23,6 @@ export function MonitoringStation({
 
   return (
     <div className="grid gap-3">
-      <header className="rounded-2xl bg-slate-950 px-6 py-8 text-white shadow-sm sm:px-8">
-        <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-300">Staff and admin only</p>
-        <h1 className="mt-2 text-3xl font-bold sm:text-4xl">Bolihon Monitoring Station</h1>
-        <p className="mt-3 max-w-3xl text-slate-300">
-          View every assigned cottage by date. Green cells are available; pale or locked cells are already booked, blocked, offline, or unavailable.
-        </p>
-      </header>
-
       <div role="tablist" aria-label="Booking channel" className="grid gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-2">
         {([
           ["walk-in", "Walk-in Booking", "Cottages unchecked for online reservations"],

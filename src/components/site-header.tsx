@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { BolihonLogo } from "@/components/bolihon-logo";
 import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
 
@@ -12,6 +13,7 @@ const publicNavItems = [
 
 export function SiteHeader() {
   const { user, logout } = useDemoAuth();
+  const pathname = usePathname();
   const navItems = [
     ...publicNavItems,
     ...(user ? [{ href: "/dashboard", label: "Dashboard" }] : []),
@@ -23,6 +25,10 @@ export function SiteHeader() {
         ]
       : []),
   ];
+  const isActive = (href: string) =>
+    pathname === href ||
+    pathname.startsWith(`${href}/`) ||
+    (href === "/booking-by-date" && pathname === "/booking");
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/50 bg-white/85 backdrop-blur-xl">
@@ -61,12 +67,21 @@ export function SiteHeader() {
             </Link>
           )}
         </div>
-        <nav className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-medium text-slate-700 md:justify-center">
-          {navItems.map((item) => (
-            <Link key={item.href} href={item.href} prefetch className="transition hover:text-bolihon-green">
-              {item.label}
-            </Link>
-          ))}
+        <nav className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-700 md:justify-center">
+          {navItems.map((item) => {
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                prefetch
+                aria-current={active ? "page" : undefined}
+                className={`rounded-lg px-3 py-2 font-semibold transition ${active ? "bg-bolihon-green text-white shadow-md" : "hover:bg-emerald-50 hover:text-bolihon-green"}`}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
       </div>
     </header>
