@@ -91,6 +91,10 @@ function formatPeso(value: number | undefined) {
   return `Php${(Number.isFinite(value) ? value || 0 : 0).toLocaleString()}`;
 }
 
+function confirmTypedDelete(itemLabel: string) {
+  return window.prompt(`Type DELETE to permanently delete ${itemLabel}.`)?.trim() === "DELETE";
+}
+
 function getRemainingBalance(booking: Booking) {
   return Math.max(0, booking.totalPrice - (booking.paymentAmountPaid || 0));
 }
@@ -574,7 +578,7 @@ function UserAdministration() {
   }
 
   async function deleteUser(user: ManagedUser) {
-    if (!window.confirm(`Delete ${user.email}? This removes the Supabase Auth user.`)) return;
+    if (!confirmTypedDelete(`${user.email}. This also removes the account`)) return;
 
     setMessage("");
     try {
@@ -1588,7 +1592,7 @@ function ReviewModeration({
   }
 
   async function deleteReview(id: string) {
-    if (!window.confirm("Delete this review?")) return;
+    if (!confirmTypedDelete("this review")) return;
 
     setMessage("");
     const previous = reviews;
@@ -1728,14 +1732,24 @@ function CottageManagement({
   }
 
   async function saveOnlineDesignation(onlineReservable: boolean) {
+    const designationUpdates: Partial<Room> = onlineReservable
+      ? { onlineReservable: true }
+      : {
+          onlineReservable: false,
+          premiumFeeEnabled: false,
+          premiumFeeAmount: 0,
+          reservationFeeEnabled: false,
+          reservationFeeAmount: 0,
+        };
+
     if (!selected || draftIds.has(selected.id)) {
-      updateSelected({ onlineReservable });
+      updateSelected(designationUpdates);
       setMessage("Save the new cottage to store its booking designation.");
       return;
     }
 
-    const updatedRoom = { ...selected, onlineReservable };
-    updateSelected({ onlineReservable });
+    const updatedRoom = { ...selected, ...designationUpdates };
+    updateSelected(designationUpdates);
     setMessage("Saving booking designation...");
 
     try {
@@ -1746,10 +1760,16 @@ function CottageManagement({
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Unable to save booking designation.");
-      setMessage(onlineReservable ? "Assigned to online booking." : "Assigned to walk-in booking.");
+      setMessage(onlineReservable ? "Assigned to online booking." : "Assigned to walk-in booking. Premium and reservation fees were removed.");
       await onReload();
     } catch (error) {
-      updateSelected({ onlineReservable: selected.onlineReservable ?? true });
+      updateSelected({
+        onlineReservable: selected.onlineReservable ?? true,
+        premiumFeeEnabled: selected.premiumFeeEnabled,
+        premiumFeeAmount: selected.premiumFeeAmount,
+        reservationFeeEnabled: selected.reservationFeeEnabled,
+        reservationFeeAmount: selected.reservationFeeAmount,
+      });
       setMessage(error instanceof Error ? error.message : "Unable to save booking designation.");
     }
   }
@@ -1775,6 +1795,7 @@ function CottageManagement({
   }
 
   function deleteAmenity(amenity: string) {
+    if (!confirmTypedDelete(`the ${amenity} amenity`)) return;
     updateSelected({
       amenities: (selected.amenities || []).filter((item) => item !== amenity),
     });
@@ -1793,6 +1814,7 @@ function CottageManagement({
 
   function deleteInclude(include: string) {
     if (!selected) return;
+    if (!confirmTypedDelete(`the ${include} booking inclusion`)) return;
     updateSelected({
       bookingIncludes: (selected.bookingIncludes || []).filter((item) => item !== include),
     });
@@ -1859,7 +1881,7 @@ function CottageManagement({
   }
 
   async function deleteCottage() {
-    if (!selected || !window.confirm(`Delete ${selected.name}?`)) return;
+    if (!selected || !confirmTypedDelete(selected.name)) return;
     const previous = cottages;
     onUpdate((current) => current.filter((cottage) => cottage.id !== selected.id));
     setSelectedId(cottages.find((cottage) => cottage.id !== selected.id)?.id || "");
@@ -1909,7 +1931,8 @@ function CottageManagement({
       setMessage("Move or delete cottages in this category first.");
       return;
     }
-    if (!window.confirm("Delete this category?")) return;
+    const category = categories.find((item) => item.id === categoryId);
+    if (!confirmTypedDelete(category?.name || "this category")) return;
 
     onCategoriesUpdate((current) => current.filter((category) => category.id !== categoryId));
     try {
@@ -2053,16 +2076,18 @@ function CottageManagement({
             />
             <span>Designated for online reservations <span className="mt-1 block text-xs font-normal text-cyan-800">Uncheck to reserve this cottage for walk-in bookings.</span></span>
           </label>
-          <div className="rounded-md border border-slate-200 p-3">
+          <div className={`rounded-md border p-3 ${selected.onlineReservable === false ? "border-slate-200 bg-slate-50 opacity-70" : "border-slate-200"}`}>
             <label className="flex items-center gap-3 text-sm font-semibold text-slate-700">
               <input
                 type="checkbox"
                 checked={selected.premiumFeeEnabled ?? false}
+                disabled={selected.onlineReservable === false}
                 onChange={(event) => updateSelected({ premiumFeeEnabled: event.target.checked })}
                 className="h-4 w-4"
               />
               Add premium charge
             </label>
+            {selected.onlineReservable === false ? <p className="mt-1 pl-7 text-xs text-slate-500">Not applicable to walk-in cottages.</p> : null}
             {selected.premiumFeeEnabled ? (
               <div className="mt-3">
                 <EditField
@@ -2074,16 +2099,18 @@ function CottageManagement({
               </div>
             ) : null}
           </div>
-          <div className="rounded-md border border-slate-200 p-3">
+          <div className={`rounded-md border p-3 ${selected.onlineReservable === false ? "border-slate-200 bg-slate-50 opacity-70" : "border-slate-200"}`}>
             <label className="flex items-center gap-3 text-sm font-semibold text-slate-700">
               <input
                 type="checkbox"
                 checked={selected.reservationFeeEnabled ?? false}
+                disabled={selected.onlineReservable === false}
                 onChange={(event) => updateSelected({ reservationFeeEnabled: event.target.checked })}
                 className="h-4 w-4"
               />
               Add reservation/service fee
             </label>
+            {selected.onlineReservable === false ? <p className="mt-1 pl-7 text-xs text-slate-500">Not applicable to walk-in cottages.</p> : null}
             {selected.reservationFeeEnabled ? (
               <div className="mt-3">
                 <EditField
