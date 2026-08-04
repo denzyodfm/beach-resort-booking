@@ -455,7 +455,37 @@ export function DateCottageBooking({
               <p className="text-sm text-slate-500">{selectedCategory.description}</p>
             </div>
 
-            <div className={`${todayOnly ? "min-h-0" : "max-h-[70vh] min-h-96"} overflow-auto overscroll-contain rounded border bg-white [scrollbar-gutter:stable]`}>
+            {todayOnly ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {visibleRooms.map((room) => {
+                  const blocked = findBlockedBookingDate(today, today, blockedDates);
+                  const hasBooking = activeBookings.some((booking) => booking.roomId === room.id && dateRangesOverlap(booking.checkIn, booking.checkOut, today, today));
+                  const disabled = room.available === false || hasBooking || blocked.blocked;
+                  const cardStyle = hasBooking
+                    ? "cursor-not-allowed border-amber-300 bg-amber-50 text-amber-950"
+                    : disabled
+                      ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                      : "border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 hover:shadow-md";
+
+                  return (
+                    <button
+                      key={room.id}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => selectCell(room, today)}
+                      className={`flex min-h-36 flex-col justify-between rounded-xl border p-4 text-left transition ${cardStyle}`}
+                    >
+                      <span>
+                        <span className="block text-lg font-bold">{room.name}</span>
+                        <span className={`mt-1 block text-sm font-semibold ${disabled ? "text-current" : "text-white/85"}`}>{formatPeso(room.pricePerNight)}</span>
+                      </span>
+                      <span className="mt-5 block text-sm font-bold">{hasBooking ? "Booked today" : disabled ? "Unavailable" : "Available — Book walk-in"}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+            <div className="max-h-[70vh] min-h-96 overflow-auto overscroll-contain rounded border bg-white [scrollbar-gutter:stable]">
               <div className={`${todayOnly ? "min-w-[520px]" : "min-w-[1050px]"} w-full`}>
                 {/* Header: days */}
                 <div className="sticky top-0 z-20 border-b border-slate-300 bg-white px-2 py-3 shadow-sm">
@@ -526,6 +556,7 @@ export function DateCottageBooking({
                 </div>
               </div>
             </div>
+            )}
 
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-5 md:hidden">
               <div className="mb-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center">
