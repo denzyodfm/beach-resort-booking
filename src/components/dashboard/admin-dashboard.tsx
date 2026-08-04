@@ -1708,12 +1708,14 @@ function CottageManagement({
   onReload: () => Promise<void>;
 }) {
   const [selectedId, setSelectedId] = useState(cottages[0]?.id || "");
+  const [categoryFilterId, setCategoryFilterId] = useState(cottages[0]?.categoryId || categories[0]?.id || "");
   const [newAmenity, setNewAmenity] = useState("");
   const [newInclude, setNewInclude] = useState("");
   const [message, setMessage] = useState("");
   const [categoryDraft, setCategoryDraft] = useState({ name: "", description: "" });
   const [draftIds, setDraftIds] = useState<Set<string>>(() => new Set());
-  const selected = cottages.find((cottage) => cottage.id === selectedId) || cottages[0];
+  const filteredCottages = cottages.filter((cottage) => !categoryFilterId || cottage.categoryId === categoryFilterId);
+  const selected = filteredCottages.find((cottage) => cottage.id === selectedId) || filteredCottages[0];
   const amenityOptions = Array.from(
     new Set([...defaultAmenityOptions, ...cottages.flatMap((cottage) => cottage.amenities)]),
   ).sort((a, b) => a.localeCompare(b));
@@ -1770,8 +1772,8 @@ function CottageManagement({
   }
 
   function addCottage() {
-    const category = categories[0] || { id: "cove", name: "Cove cottages", description: "", sortOrder: 0 };
-    const id = `cottage_${category.id}_${Date.now()}`;
+    const category = categories.find((item) => item.id === categoryFilterId) || categories[0] || { id: "cove", name: "Cove cottages", description: "", sortOrder: 0 };
+    const id = `cottage_${category.id}_${crypto.randomUUID()}`;
     const nextRoom: Room = {
       id,
       slug: id.replace(/_/g, "-"),
@@ -1897,6 +1899,28 @@ function CottageManagement({
 
   return (
     <Panel title="Cottage details editor" eyebrow="Inventory admin">
+      <div className="mb-5 max-w-md rounded-lg border border-cyan-100 bg-cyan-50 p-4">
+        <label htmlFor="cottageCategoryFilter" className="text-sm font-bold text-cyan-950">
+          Filter cottages by category
+        </label>
+        <select
+          id="cottageCategoryFilter"
+          value={categoryFilterId}
+          onChange={(event) => {
+            const categoryId = event.target.value;
+            setCategoryFilterId(categoryId);
+            setSelectedId(cottages.find((cottage) => cottage.categoryId === categoryId)?.id || "");
+            setMessage("");
+          }}
+          className="mt-2 w-full rounded-md border border-cyan-200 bg-white px-3 py-3 text-sm font-semibold text-slate-800 outline-none ring-cyan-600 focus:ring-2"
+        >
+          {categories.map((category) => (
+            <option key={category.id} value={category.id}>
+              {category.name} ({cottages.filter((cottage) => cottage.categoryId === category.id).length})
+            </option>
+          ))}
+        </select>
+      </div>
       <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
         <div>
           <label htmlFor="cottageSelect" className="text-sm font-semibold text-slate-700">
@@ -1908,7 +1932,7 @@ function CottageManagement({
             onChange={(event) => setSelectedId(event.target.value)}
             className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-sm outline-none ring-cyan-600 focus:ring-2"
           >
-            {cottages.map((cottage) => (
+            {filteredCottages.map((cottage) => (
               <option key={cottage.id} value={cottage.id}>
                 {cottage.name} - Php{cottage.pricePerNight.toLocaleString()}/day
               </option>
@@ -1959,6 +1983,7 @@ function CottageManagement({
               value={selected.categoryId}
               onChange={(event) => {
                 const category = categories.find((item) => item.id === event.target.value);
+                setCategoryFilterId(event.target.value);
                 updateSelected({
                   type: event.target.value,
                   categoryId: event.target.value,
