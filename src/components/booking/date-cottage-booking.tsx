@@ -416,12 +416,7 @@ export function DateCottageBooking({
               {blockedDate.reason}
             </p>
           ) : null}
-        </div> : (
-          <div className={`rounded-lg border border-emerald-200 bg-emerald-50 shadow-sm ${compact ? "px-3 py-2" : "px-5 py-4"}`}>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Today&apos;s walk-in availability</p>
-            <p className={`${compact ? "text-sm" : "mt-1 text-lg"} font-bold text-emerald-950`}>{today}</p>
-          </div>
-        )}
+        </div> : null}
 
         <div className={`rounded-lg border border-slate-200 bg-white shadow-sm ${compact ? "px-2 py-1.5" : "px-3 py-2.5"}`}>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Category</p>
