@@ -7,7 +7,7 @@ import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
 import { getDemoBookings, saveDemoBooking } from "@/lib/demo-bookings";
 import { nightsBetween } from "@/lib/resort-data";
 import { hasSupabaseEnv } from "@/lib/supabase-browser";
-import type { Booking, BookingStatus, CottageCategory, PaymentStatus, Room } from "@/lib/types";
+import type { Booking, BookingStatus, CottageCategory, PaymentLog, PaymentStatus, Room } from "@/lib/types";
 
 type BookingRow = Booking | Record<string, unknown>;
 type FormState = {
@@ -22,6 +22,12 @@ const activeStatuses: BookingStatus[] = ["pending", "confirmed"];
 function normalizeBooking(row: BookingRow): Booking {
   const source = row as Record<string, unknown>;
   const nestedRoom = source.rooms as { name?: string } | undefined;
+  let paymentDetails: Record<string, unknown> = {};
+  try {
+    paymentDetails = typeof source.special_requests === "string" ? JSON.parse(source.special_requests) : {};
+  } catch {
+    paymentDetails = {};
+  }
 
   return {
     id: String(source.id || source.booking_number || ""),
@@ -36,6 +42,9 @@ function normalizeBooking(row: BookingRow): Booking {
     totalPrice: Number(source.totalPrice ?? source.total_amount ?? 0),
     status: (source.status || "pending") as BookingStatus,
     paymentStatus: (source.paymentStatus || source.payment_status || "unpaid") as PaymentStatus,
+    paymentNote: String(paymentDetails.paymentNote || source.paymentNote || ""),
+    paymentAmountPaid: Number(paymentDetails.paymentAmountPaid || source.paymentAmountPaid || 0),
+    paymentHistory: Array.isArray(paymentDetails.paymentHistory) ? paymentDetails.paymentHistory as PaymentLog[] : [],
     createdAt: String(source.createdAt || source.created_at || new Date().toISOString()).slice(0, 10),
   };
 }
@@ -81,6 +90,10 @@ export function DateCottageBooking({
   });
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [selectedExistingBooking, setSelectedExistingBooking] = useState<Booking | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [paidBy, setPaidBy] = useState("");
   const bookingDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -221,8 +234,13 @@ export function DateCottageBooking({
     }
 
     const conflict = getDateBooking(room.id, day);
+    if (conflict && isManager) {
+      openBookedCottage(room, day, conflict);
+      return;
+    }
     if (room.available === false || conflict) return;
 
+    setSelectedExistingBooking(null);
     setSelectedDay(day);
     setSelectedRoomId(room.id);
     setMessage("");
@@ -234,6 +252,18 @@ export function DateCottageBooking({
         document.getElementById("mobile-guest-name")?.focus();
       }
     });
+  }
+
+  function openBookedCottage(room: Room, day: string, booking: Booking) {
+    const balance = Math.max(0, booking.totalPrice - (booking.paymentAmountPaid || 0));
+    setSelectedRoomId(room.id);
+    setSelectedDay(day);
+    setSelectedExistingBooking(booking);
+    setPaymentAmount(String(balance));
+    setPaymentNote(booking.paymentNote || "");
+    setPaidBy(booking.guestName || "");
+    setMessage("");
+    window.requestAnimationFrame(() => bookingDialogRef.current?.showModal());
   }
 
   async function submitBooking(event: React.FormEvent<HTMLFormElement>) {
@@ -307,8 +337,59 @@ export function DateCottageBooking({
       setMessage(result.message || `${selectedRoom.name} is held as a pending booking for ${effectiveDay}.`);
       setSelectedRoomId("");
       bookingDialogRef.current?.close();
+      window.dispatchEvent(new Event("bolihon-bookings-updated"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to save booking.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function recordPayment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedExistingBooking) return;
+    const amount = Number(paymentAmount);
+    const currentPaid = selectedExistingBooking.paymentAmountPaid || 0;
+    const nextPaid = Math.min(selectedExistingBooking.totalPrice, currentPaid + amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setMessage("Enter a payment amount greater than zero.");
+      return;
+    }
+
+    const paymentLog: PaymentLog = {
+      id: `PAY-${window.crypto.randomUUID()}`,
+      type: "payment",
+      amount,
+      note: paymentNote.trim(),
+      paidBy: paidBy.trim() || selectedExistingBooking.guestName,
+      actorName: user?.name || user?.email || "Staff",
+      actorRole: user?.role || "staff",
+      createdAt: new Date().toISOString(),
+      balanceAfter: Math.max(0, selectedExistingBooking.totalPrice - nextPaid),
+    };
+
+    setSubmitting(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/admin/bookings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: selectedExistingBooking.id,
+          paymentStatus: nextPaid >= selectedExistingBooking.totalPrice ? "paid" : "deposit_paid",
+          paymentNote: paymentNote.trim(),
+          paymentAmountPaid: nextPaid,
+          paymentHistory: [...(selectedExistingBooking.paymentHistory || []), paymentLog],
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || "Unable to record payment.");
+      setSelectedExistingBooking(null);
+      setSelectedRoomId("");
+      bookingDialogRef.current?.close();
+      window.dispatchEvent(new Event("bolihon-bookings-updated"));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to record payment.");
     } finally {
       setSubmitting(false);
     }
@@ -459,7 +540,8 @@ export function DateCottageBooking({
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                 {visibleRooms.map((room) => {
                   const blocked = findBlockedBookingDate(today, today, blockedDates);
-                  const hasBooking = activeBookings.some((booking) => booking.roomId === room.id && dateRangesOverlap(booking.checkIn, booking.checkOut, today, today));
+                  const dateBooking = activeBookings.find((booking) => booking.roomId === room.id && dateRangesOverlap(booking.checkIn, booking.checkOut, today, today));
+                  const hasBooking = Boolean(dateBooking);
                   const disabled = room.available === false || hasBooking || blocked.blocked;
                   const cardStyle = hasBooking
                     ? "cursor-not-allowed border-amber-300 bg-amber-50 text-amber-950"
@@ -471,15 +553,17 @@ export function DateCottageBooking({
                     <button
                       key={room.id}
                       type="button"
-                      disabled={disabled}
-                      onClick={() => selectCell(room, today)}
+                      disabled={disabled && !(hasBooking && isManager)}
+                      onClick={() => dateBooking && isManager ? openBookedCottage(room, today, dateBooking) : selectCell(room, today)}
                       className={`flex min-h-36 flex-col justify-between rounded-xl border p-4 text-left transition ${cardStyle}`}
                     >
                       <span>
                         <span className="block text-lg font-bold">{room.name}</span>
                         <span className={`mt-1 block text-sm font-semibold ${disabled ? "text-current" : "text-white/85"}`}>{formatPeso(room.pricePerNight)}</span>
                       </span>
-                      <span className="mt-5 block text-sm font-bold">{hasBooking ? "Booked today" : disabled ? "Unavailable" : "Available — Book walk-in"}</span>
+                      <span className="mt-5 block text-sm font-bold">
+                        {dateBooking ? <><span className="block">Booked today</span><span className="mt-1 block font-semibold">Guest: {dateBooking.guestName || "Not provided"}</span>{isManager ? <span className="mt-1 block text-xs">Click to record payment</span> : null}</> : disabled ? "Unavailable" : "Available — Book walk-in"}
+                      </span>
                     </button>
                   );
                 })}
@@ -523,11 +607,12 @@ export function DateCottageBooking({
                       </div>
                       {monthDays.map((day) => {
                         const blocked = findBlockedBookingDate(day, day, blockedDates);
-                        const hasBooking = activeBookings.some((b) => b.roomId === room.id && dateRangesOverlap(b.checkIn, b.checkOut, day, day));
+                        const dateBooking = activeBookings.find((b) => b.roomId === room.id && dateRangesOverlap(b.checkIn, b.checkOut, day, day));
+                        const hasBooking = Boolean(dateBooking);
                         const isPastDate = day < today;
                         const disabled = isPastDate || room.available === false || hasBooking || blocked.blocked;
                         const cellStyle = hasBooking
-                          ? "cursor-not-allowed border-amber-400 bg-amber-400 text-amber-950"
+                          ? `${isManager ? "cursor-pointer hover:bg-amber-500" : "cursor-not-allowed"} border-amber-400 bg-amber-400 text-amber-950`
                           : disabled
                             ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
                             : "border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600";
@@ -536,12 +621,12 @@ export function DateCottageBooking({
                           <button
                             key={day}
                             type="button"
-                            disabled={disabled}
-                            onClick={() => selectCell(room, day)}
+                            disabled={disabled && !(hasBooking && isManager)}
+                            onClick={() => dateBooking && isManager ? openBookedCottage(room, day, dateBooking) : selectCell(room, day)}
                             className={`flex w-full items-center justify-center border font-bold transition ${todayOnly ? "h-14 rounded-lg text-sm" : "h-7 min-w-6 rounded-sm"} ${cellStyle}`}
                             title={
                               hasBooking
-                                ? `${room.name} — Booked on ${day}`
+                                ? `${room.name} — Booked by ${dateBooking?.guestName || "guest"} on ${day}${isManager ? ". Click to record payment." : ""}`
                                 : isPastDate
                                   ? `${day} — Past date`
                                   : `${room.name} — ${day}`
@@ -607,15 +692,32 @@ export function DateCottageBooking({
                 <div className="p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">Booking details</p>
+                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">{selectedExistingBooking ? "Cottage payment" : "Booking details"}</p>
                       <h2 className="mt-1 text-2xl font-bold text-slate-950">{selectedRoom.name}</h2>
-                      <p className="mt-1 text-sm text-slate-600">{effectiveDay} · {formatPeso(total)}</p>
+                      <p className="mt-1 text-sm text-slate-600">{effectiveDay} · {formatPeso(selectedExistingBooking?.totalPrice || total)}</p>
                     </div>
                     <button type="button" onClick={() => bookingDialogRef.current?.close()} className="rounded-full border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
                       Close
                     </button>
                   </div>
-                  <div className="mt-5">{renderBookingForm("dialog")}</div>
+                  <div className="mt-5">
+                    {selectedExistingBooking ? (
+                      <form onSubmit={recordPayment} className="grid gap-4">
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                          <p className="font-bold">Guest: {selectedExistingBooking.guestName || "Not provided"}</p>
+                          <p className="mt-1">Total: {formatPeso(selectedExistingBooking.totalPrice)}</p>
+                          <p className="mt-1">Paid: {formatPeso(selectedExistingBooking.paymentAmountPaid || 0)}</p>
+                          <p className="mt-1 font-bold">Balance: {formatPeso(Math.max(0, selectedExistingBooking.totalPrice - (selectedExistingBooking.paymentAmountPaid || 0)))}</p>
+                        </div>
+                        <Field id="monitoring-payment-amount" label="Payment amount" type="number" value={paymentAmount} onChange={setPaymentAmount} />
+                        <Field id="monitoring-paid-by" label="Paid by" value={paidBy} onChange={setPaidBy} />
+                        <Field id="monitoring-payment-note" label="Payment note" required={false} value={paymentNote} onChange={setPaymentNote} />
+                        <button type="submit" disabled={submitting || Number(paymentAmount) <= 0} className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300">
+                          {submitting ? "Recording..." : "Record cottage payment"}
+                        </button>
+                      </form>
+                    ) : renderBookingForm("dialog")}
+                  </div>
                   {message ? <p className="mt-4 rounded-md bg-cyan-50 px-4 py-3 text-sm text-cyan-900">{message}</p> : null}
                 </div>
               ) : null}
