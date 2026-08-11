@@ -1760,7 +1760,7 @@ function CottageManagement({
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Unable to save booking designation.");
-      setMessage(onlineReservable ? "Assigned to online booking." : "Assigned to walk-in booking. Premium and reservation fees were removed.");
+      setMessage(onlineReservable ? "Assigned to online booking." : "Assigned to walk-in. Premium and reservation fees were removed.");
       await onReload();
     } catch (error) {
       updateSelected({
@@ -1821,7 +1821,7 @@ function CottageManagement({
   }
 
   function addCottage() {
-    const category = categories.find((item) => item.id === categoryFilterId) || categories[0] || { id: "cove", name: "Cove cottages", description: "", sortOrder: 0 };
+    const category = categories.find((item) => item.id === categoryFilterId) || categories[0] || { id: "cove", name: "Cottages", description: "", sortOrder: 0 };
     const id = `cottage_${category.id}_${crypto.randomUUID()}`;
     const nextRoom: Room = {
       id,
@@ -2074,7 +2074,7 @@ function CottageManagement({
               onChange={(event) => void saveOnlineDesignation(event.target.checked)}
               className="mt-0.5 h-4 w-4"
             />
-            <span>Designated for online reservations <span className="mt-1 block text-xs font-normal text-cyan-800">Uncheck to reserve this cottage for walk-in bookings.</span></span>
+            <span>Designated for online reservations <span className="mt-1 block text-xs font-normal text-cyan-800">Uncheck to reserve this cottage for walk-in.</span></span>
           </label>
           <div className={`rounded-md border p-3 ${selected.onlineReservable === false ? "border-slate-200 bg-slate-50 opacity-70" : "border-slate-200"}`}>
             <label className="flex items-center gap-3 text-sm font-semibold text-slate-700">

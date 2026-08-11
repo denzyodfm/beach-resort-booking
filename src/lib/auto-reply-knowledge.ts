@@ -22,7 +22,7 @@ export const defaultAutoReplyKnowledge: AutoReplyKnowledgeItem[] = [
     title: "Cottage rates",
     keywords: ["rate", "rates", "price", "cost", "how much", "fee"],
     response:
-      "Current daily rates start at Php700 for Cove cottages, Php800 for Rock and RD cottages, Php4,500 for VGP Hall, and Php3,500 for the Pavillon. Final totals depend on cottage and dates.",
+      "Current daily rates start at Php700 for Cottages 1 to 45, Php800 for Rock and RD cottages, Php4,500 for VGP Hall, and Php3,500 for the Pavillon. Final totals depend on cottage and dates.",
     sortOrder: 20,
     updatedAt: new Date(0).toISOString(),
   },

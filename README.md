@@ -3,8 +3,8 @@ BOLIHON is a modern beach resort cottage booking app built with Next.js, React, 
 ## Features
 
 - Public resort homepage with hero, gallery, amenities, testimonials, and CTAs
-- Cottage listing plus dynamic detail pages for Cove 1-45, Rock 1-6, RD 1-8, VGP Hall, and Pavillon
-- Rates: Cove Php700, Rock/RD Php800, VGP Hall Php4,500, Pavillon Php3,500
+- Cottage listing plus dynamic detail pages for Cottage 1-45, Rock 1-6, RD 1-8, VGP Hall, and Pavillon
+- Rates: Cottage Php700, Rock/RD Php800, VGP Hall Php4,500, Pavillon Php3,500
 - Booking form with date, guest, room selection, total price, and availability checks
 - Supabase Auth login and registration
 - Guest dashboard with booking cards

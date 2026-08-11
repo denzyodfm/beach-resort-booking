@@ -494,7 +494,7 @@ values
     'default-rates',
     'Cottage rates',
     array['rate', 'rates', 'price', 'cost', 'how much', 'fee'],
-    'Current daily rates start at Php700 for Cove cottages, Php800 for Rock and RD cottages, Php4,500 for VGP Hall, and Php3,500 for the Pavillon. Final totals depend on cottage and dates.',
+    'Current daily rates start at Php700 for Cottages 1 to 45, Php800 for Rock and RD cottages, Php4,500 for VGP Hall, and Php3,500 for the Pavillon. Final totals depend on cottage and dates.',
     20
   ),
   (
@@ -521,7 +521,7 @@ values
 on conflict (id) do nothing;
 
 insert into public.room_categories (id, name, description, sort_order) values
-('cove', 'Cove cottages', 'Cove 1 to 45 - Php700/day', 10),
+('cove', 'Cottages', 'Cottage 1 to 45 - Php700/day', 10),
 ('rock', 'Rock cottages', 'Rock 1 to 6 - Php800/day', 20),
 ('rd', 'RD cottages', 'RD 1 to 8 - Php800/day', 30),
 ('hall', 'VGP Hall', 'Event cottage - Php4,500/day', 40),
@@ -549,8 +549,8 @@ insert into public.rooms (
 ) 
 select
   'cottage_cove_' || n,
-  'cove-' || n,
-  'Cove ' || n,
+  'cottage-' || n,
+  'Cottage ' || n,
   'cove',
   'cove',
   'Beachside cottage close to the cove path and resort gardens.',

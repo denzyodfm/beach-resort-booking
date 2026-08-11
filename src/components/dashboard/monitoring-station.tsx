@@ -25,7 +25,7 @@ export function MonitoringStation({
     <div className="grid gap-3">
       <div role="tablist" aria-label="Booking channel" className="grid gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-2">
         {([
-          ["walk-in", "Walk-in Booking", "Cottages unchecked for online reservations"],
+          ["walk-in", "Walk-in", "Cottages unchecked for online reservations"],
           ["online", "Online Booking", "Cottages checked for online reservations"],
         ] as const).map(([id, label, detail]) => (
           <button
@@ -51,7 +51,7 @@ export function MonitoringStation({
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">{mode} availability</p>
           <h2 className="text-xl font-bold text-slate-950">
-            {mode === "online" ? "Online booking cottages" : "Walk-in booking cottages"}
+            {mode === "online" ? "Online booking cottages" : "Walk-in cottages"}
           </h2>
           <p className="text-sm text-slate-600">{mode === "walk-in" ? `Showing walk-in availability for today, ${resortToday}.` : "Choose a month and category to inspect or create a reservation."}</p>
         </div>

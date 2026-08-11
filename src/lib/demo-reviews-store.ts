@@ -4,7 +4,7 @@ const reviews: Review[] = [
   {
     id: "REV-DEMO-1",
     roomId: "cottage_cove_1",
-    roomName: "Cove 1",
+    roomName: "Cottage 1",
     guestName: "Maria Santos",
     guestEmail: "maria@example.com",
     rating: 5,

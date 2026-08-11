@@ -111,7 +111,7 @@ export function CottageSearchList({ rooms, categories }: { rooms: Room[]; catego
           id="cottageSearch"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search Cove 12, Rock, RD, VGP Hall..."
+          placeholder="Search Cottage 12, Rock, RD, VGP Hall..."
           className="min-h-12 flex-1 rounded-md border border-slate-200 px-4 text-sm outline-none ring-bolihon-green focus:ring-2"
         />
         <div className="flex gap-2">

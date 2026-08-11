@@ -56,7 +56,7 @@ export function getBookingChargeSettings(values: unknown) {
 }
 
 export const defaultCategories: CottageCategory[] = [
-  { id: "cove", name: "Cove cottages", description: "Cove 1 to 45 - Php700/day", sortOrder: 10 },
+  { id: "cove", name: "Cottages", description: "Cottage 1 to 45 - Php700/day", sortOrder: 10 },
   { id: "rock", name: "Rock cottages", description: "Rock 1 to 6 - Php800/day", sortOrder: 20 },
   { id: "rd", name: "RD cottages", description: "RD 1 to 8 - Php800/day", sortOrder: 30 },
   { id: "hall", name: "VGP Hall", description: "Event cottage - Php4,500/day", sortOrder: 40 },
@@ -79,7 +79,7 @@ const groupDetails: Record<
   }
 > = {
   cove: {
-    label: "Cove",
+    label: "Cottage",
     count: 45,
     baseRate: 700,
     maxGuests: 4,
