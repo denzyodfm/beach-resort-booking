@@ -1,3 +1,4 @@
+import { requireResortManager } from "@/lib/admin-auth";
 import { normalizeBlockedDate } from "@/lib/booking-blocked-dates";
 import {
   addServerBlockedDate,
@@ -7,6 +8,9 @@ import {
 import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
 
 export async function GET() {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json(getServerBlockedDates());
   }
@@ -19,6 +23,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   const body = (await request.json()) as Record<string, unknown>;
   const date = String(body.date || body.blocked_date || "").trim();
   const label = String(body.label || body.name || "Philippine holiday").trim();
@@ -51,6 +58,9 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id") || "";
   if (!id) return Response.json({ message: "Missing holiday id." }, { status: 400 });

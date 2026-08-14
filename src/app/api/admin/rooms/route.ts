@@ -1,7 +1,11 @@
+import { requireResortManager } from "@/lib/admin-auth";
 import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
 import { defaultCategories, normalizeCategory, normalizeRoom, onlineReservablePrefix, premiumFeePrefix, reservationFeePrefix, reservationHoldPrefix, rooms } from "@/lib/resort-data";
 
 export async function GET() {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json({ rooms, categories: defaultCategories });
   }
@@ -22,6 +26,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json({ message: "Connect Supabase to create rooms." }, { status: 501 });
   }
@@ -41,6 +48,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json({ message: "Connect Supabase to update cottages." }, { status: 501 });
   }
@@ -59,6 +69,9 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json({ message: "Connect Supabase to delete cottages." }, { status: 501 });
   }

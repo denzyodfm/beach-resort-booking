@@ -15,11 +15,36 @@ import { getBookingBlockedDates } from "@/lib/booking-blocked-dates-server";
 import { sendBookingConfirmationEmail } from "@/lib/email";
 import { sendBookingConfirmationSms } from "@/lib/sms";
 import { expireUnpaidReservations } from "@/lib/reservation-expiry";
+import { isResortManager } from "@/lib/admin-auth";
+
+/**
+ * Availability-only view of a booking. The public date grid needs to know which
+ * cottage is taken on which day; it does not need the guest's name, contact
+ * details, or what they paid. Those fields only go out to staff and admin.
+ */
+function toAvailabilityRow(row: Record<string, unknown>) {
+  const room = row.rooms as { name?: string } | undefined;
+
+  return {
+    id: String(row.id ?? row.booking_number ?? ""),
+    roomId: String(row.roomId ?? row.room_id ?? ""),
+    roomName: String(row.roomName ?? room?.name ?? "Cottage"),
+    checkIn: String(row.checkIn ?? row.check_in ?? ""),
+    checkOut: String(row.checkOut ?? row.check_out ?? ""),
+    status: String(row.status ?? "pending"),
+    paymentStatus: String(row.paymentStatus ?? row.payment_status ?? "unpaid"),
+  };
+}
 
 export async function GET() {
   await expireUnpaidReservations();
+  const manager = await isResortManager();
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return Response.json(getServerDemoBookings());
+    const demoBookings = getServerDemoBookings();
+    return Response.json(
+      manager ? demoBookings : demoBookings.map((booking) => toAvailabilityRow(booking as unknown as Record<string, unknown>)),
+    );
   }
 
   const supabase = createAdminClient();
@@ -30,7 +55,9 @@ export async function GET() {
 
   if (error) return Response.json({ message: error.message }, { status: 500 });
 
-  return Response.json(data);
+  return Response.json(
+    manager ? data : (data || []).map((row) => toAvailabilityRow(row as Record<string, unknown>)),
+  );
 }
 
 export async function POST(request: Request) {
@@ -196,11 +223,26 @@ export async function PATCH(request: Request) {
 
   if (lookupError) return Response.json({ message: lookupError.message }, { status: 404 });
 
-  if (body.guestEmail && booking.guest_email !== body.guestEmail) {
-    return Response.json({ message: "This booking does not match the guest email provided." }, { status: 403 });
-  }
-  if (body.guestPhone && booking.guest_phone !== body.guestPhone) {
-    return Response.json({ message: "This booking does not match the guest cellphone provided." }, { status: 403 });
+  // These checks used to be skipped entirely when the caller sent no identifier,
+  // so knowing a booking id was enough to cancel someone else's stay. Managers
+  // may act on any booking; everyone else must prove they hold the contact
+  // details the booking was made with.
+  if (!(await isResortManager())) {
+    const guestEmail = body.guestEmail?.trim();
+    const guestPhone = body.guestPhone?.trim();
+
+    if (!guestEmail && !guestPhone) {
+      return Response.json(
+        { message: "Provide the email or cellphone used for this booking." },
+        { status: 403 },
+      );
+    }
+    if (guestEmail && booking.guest_email !== guestEmail) {
+      return Response.json({ message: "This booking does not match the guest email provided." }, { status: 403 });
+    }
+    if (guestPhone && booking.guest_phone !== guestPhone) {
+      return Response.json({ message: "This booking does not match the guest cellphone provided." }, { status: 403 });
+    }
   }
 
   const cancellation = canGuestCancel(booking.check_in);

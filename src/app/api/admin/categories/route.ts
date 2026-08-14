@@ -1,7 +1,11 @@
+import { requireResortManager } from "@/lib/admin-auth";
 import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
 import { defaultCategories, normalizeCategory } from "@/lib/resort-data";
 
 export async function GET() {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json(defaultCategories);
   }
@@ -14,6 +18,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json({ message: "Connect Supabase to create categories." }, { status: 501 });
   }
@@ -28,6 +35,9 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json({ message: "Connect Supabase to update categories." }, { status: 501 });
   }
@@ -42,6 +52,9 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json({ message: "Connect Supabase to delete categories." }, { status: 501 });
   }

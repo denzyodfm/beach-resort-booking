@@ -1,3 +1,4 @@
+import { requireResortManager } from "@/lib/admin-auth";
 import { createAdminClient, createClientServer, hasSupabaseEnv } from "@/lib/supabase-server";
 import { getServerDemoBookings, updateServerDemoBooking } from "@/lib/demo-booking-store";
 import { isPaidEnoughToConfirm } from "@/lib/booking-logic";
@@ -5,6 +6,9 @@ import type { Booking, BookingStatus, PaymentLog, PaymentStatus } from "@/lib/ty
 import { expireUnpaidReservations } from "@/lib/reservation-expiry";
 
 export async function GET() {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   await expireUnpaidReservations();
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json(getServerDemoBookings());
@@ -21,6 +25,9 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   const {
     id,
     status,

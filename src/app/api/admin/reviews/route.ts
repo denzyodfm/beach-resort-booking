@@ -1,3 +1,4 @@
+import { requireResortManager } from "@/lib/admin-auth";
 import {
   deleteServerDemoReview,
   getServerDemoReviews,
@@ -7,6 +8,9 @@ import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
 import { normalizeReview } from "@/lib/reviews";
 
 export async function GET() {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return Response.json(getServerDemoReviews());
   }
@@ -22,6 +26,9 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   const { id, status } = await request.json();
   if (!id || !["pending", "published"].includes(status)) {
     return Response.json({ message: "Missing review id or status." }, { status: 400 });
@@ -46,6 +53,9 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const auth = await requireResortManager();
+  if (!auth.ok) return auth.response;
+
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   if (!id) return Response.json({ message: "Missing review id." }, { status: 400 });
