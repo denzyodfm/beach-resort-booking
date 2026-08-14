@@ -1,3 +1,7 @@
+-- SUPERSEDED: names are now being renamed by hand in the admin dashboard.
+-- Use supabase/cottage-slugs-and-category.sql instead, which covers only the
+-- slugs and the category label. Kept for reference and for fresh environments.
+
 -- Rename "Cove 1..45" to "Cottage 1..45".
 --
 -- What changes:  rooms.name, rooms.slug, room_images.alt_text,
