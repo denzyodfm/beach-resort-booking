@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
+import { FilterX, Search, X } from "lucide-react";
 import { RoomCard } from "@/components/room-card";
 import type { CottageCategory, Room } from "@/lib/types";
 
@@ -117,8 +118,9 @@ export function CottageSearchList({ rooms, categories }: { rooms: Room[]; catego
         <div className="flex gap-2">
           <button
             type="submit"
-            className="min-h-12 rounded-full bg-bolihon-green px-6 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark"
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-bolihon-green px-6 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark"
           >
+            <Search aria-hidden="true" className="h-4 w-4 shrink-0" />
             Search
           </button>
           {submittedQuery ? (
@@ -128,8 +130,9 @@ export function CottageSearchList({ rooms, categories }: { rooms: Room[]; catego
                 setQuery("");
                 setSubmittedQuery("");
               }}
-              className="min-h-12 rounded-full border border-slate-300 px-5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border border-slate-300 px-5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
+              <X aria-hidden="true" className="h-4 w-4 shrink-0" />
               Clear
             </button>
           ) : null}
@@ -147,8 +150,9 @@ export function CottageSearchList({ rooms, categories }: { rooms: Room[]; catego
             <button
               type="button"
               onClick={() => router.replace("/rooms", { scroll: false })}
-              className="font-semibold text-bolihon-green"
+              className="inline-flex items-center gap-1.5 font-semibold text-bolihon-green"
             >
+              <FilterX aria-hidden="true" className="h-4 w-4 shrink-0" />
               Show all
             </button>
           ) : null}

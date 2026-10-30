@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { Inbox, MessageCircle, MessageCirclePlus, Send, X } from "lucide-react";
 import {
   addMessage,
   getChatStats,
@@ -120,7 +121,7 @@ export function FloatingChat() {
   if (pathname === "/chat") return null;
 
   return (
-    <div className="fixed inset-x-3 bottom-3 z-[70] flex justify-end sm:inset-x-auto sm:bottom-5 sm:right-5">
+    <div className="fixed inset-x-3 bottom-3 z-[70] flex justify-end print:hidden sm:inset-x-auto sm:bottom-5 sm:right-5">
       {open ? (
         <div className="absolute bottom-20 right-0 hidden max-h-[calc(100dvh-7rem)] w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl shadow-slate-950/20 sm:block sm:w-[380px]">
           <div className="flex items-start justify-between gap-4 bg-bolihon-green p-4 text-white">
@@ -131,10 +132,10 @@ export function FloatingChat() {
             </div>
             <button
               onClick={() => setOpen(false)}
-              className="rounded-full bg-white/10 px-3 py-1 text-sm font-bold hover:bg-white/20"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-white/10 px-3 py-1 text-sm font-bold hover:bg-white/20"
               aria-label="Close chat"
             >
-              x
+              <X aria-hidden="true" className="h-4 w-4 shrink-0" />
             </button>
           </div>
 
@@ -186,14 +187,16 @@ export function FloatingChat() {
                 />
                 <button
                   disabled={!selectedAdminConversation || !adminDraft.trim()}
-                  className="rounded-full bg-bolihon-green px-4 text-sm font-semibold text-white disabled:bg-slate-300"
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-4 text-sm font-semibold text-white disabled:bg-slate-300"
                 >
+                  <Send aria-hidden="true" className="h-4 w-4 shrink-0" />
                   Reply
                 </button>
               </form>
 
               <div className="border-t border-slate-100 px-4 py-3">
-                <Link href="/chat" className="text-sm font-semibold text-bolihon-green">
+                <Link href="/chat" className="inline-flex items-center gap-2 text-sm font-semibold text-bolihon-green">
+                  <Inbox aria-hidden="true" className="h-4 w-4 shrink-0" />
                   Open full inbox
                 </Link>
               </div>
@@ -227,8 +230,9 @@ export function FloatingChat() {
                 />
                 <button
                   disabled={!draft.trim()}
-                  className="rounded-full bg-bolihon-green px-4 text-sm font-semibold text-white disabled:bg-slate-300"
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-4 text-sm font-semibold text-white disabled:bg-slate-300"
                 >
+                  <Send aria-hidden="true" className="h-4 w-4 shrink-0" />
                   Send
                 </button>
               </form>
@@ -252,7 +256,8 @@ export function FloatingChat() {
                 required
                 className="min-h-11 rounded-md border border-slate-300 px-3 text-sm outline-none ring-bolihon-green focus:ring-2"
               />
-              <button className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white">
+              <button className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white">
+                <MessageCirclePlus aria-hidden="true" className="h-4 w-4 shrink-0" />
                 Start chat
               </button>
             </form>
@@ -264,7 +269,9 @@ export function FloatingChat() {
         onClick={() => setOpen((current) => !current)}
         className="relative hidden min-h-16 items-center gap-3 rounded-full bg-bolihon-green px-5 py-3 text-left text-white shadow-2xl shadow-slate-950/25 transition hover:bg-bolihon-green-dark sm:flex"
       >
-        <span className="grid h-10 w-10 place-items-center rounded-full bg-white/15 text-lg font-bold">?</span>
+        <span className="grid h-10 w-10 place-items-center rounded-full bg-white/15 text-lg font-bold">
+          <MessageCircle aria-hidden="true" className="h-5 w-5 shrink-0" />
+        </span>
         <span>
           <span className="block text-sm font-bold">Chat with us</span>
           <span className="block text-xs text-lime-50">Today {stats.today} · Total {stats.total}</span>
@@ -279,7 +286,9 @@ export function FloatingChat() {
         href="/chat"
         className="relative flex min-h-16 items-center gap-3 rounded-full bg-bolihon-green px-5 py-3 text-left text-white shadow-2xl shadow-slate-950/25 transition hover:bg-bolihon-green-dark sm:hidden"
       >
-        <span className="grid h-10 w-10 place-items-center rounded-full bg-white/15 text-lg font-bold">?</span>
+        <span className="grid h-10 w-10 place-items-center rounded-full bg-white/15 text-lg font-bold">
+          <MessageCircle aria-hidden="true" className="h-5 w-5 shrink-0" />
+        </span>
         <span>
           <span className="block text-sm font-bold">Chat with us</span>
           <span className="block text-xs text-lime-50">Open messages</span>

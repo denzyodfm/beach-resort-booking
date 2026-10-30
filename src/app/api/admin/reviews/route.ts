@@ -1,28 +1,26 @@
 import { requireResortManager } from "@/lib/admin-auth";
+import { errorMessage, execute, hasDatabaseEnv } from "@/lib/db";
 import {
   deleteServerDemoReview,
   getServerDemoReviews,
   updateServerDemoReview,
 } from "@/lib/demo-reviews-store";
-import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
+import { fetchReviewRows } from "@/lib/record-queries";
 import { normalizeReview } from "@/lib/reviews";
 
 export async function GET() {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     return Response.json(getServerDemoReviews());
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("reviews")
-    .select("*, rooms(name)")
-    .order("created_at", { ascending: false });
-
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-  return Response.json((data || []).map(normalizeReview));
+  try {
+    return Response.json((await fetchReviewRows()).map(normalizeReview));
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function PATCH(request: Request) {
@@ -34,22 +32,20 @@ export async function PATCH(request: Request) {
     return Response.json({ message: "Missing review id or status." }, { status: 400 });
   }
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     const updated = updateServerDemoReview(id, { status });
     if (!updated) return Response.json({ message: "Review not found." }, { status: 404 });
     return Response.json(updated);
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("reviews")
-    .update({ is_published: status === "published" })
-    .eq("id", id)
-    .select("*, rooms(name)")
-    .single();
-
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-  return Response.json(normalizeReview(data));
+  try {
+    await execute("update reviews set is_published = ? where id = ?", [status === "published" ? 1 : 0, id]);
+    const [data] = await fetchReviewRows("where v.id = ?", [id]);
+    if (!data) return Response.json({ message: "Review not found." }, { status: 404 });
+    return Response.json(normalizeReview(data));
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: Request) {
@@ -60,14 +56,15 @@ export async function DELETE(request: Request) {
   const id = searchParams.get("id");
   if (!id) return Response.json({ message: "Missing review id." }, { status: 400 });
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     if (!deleteServerDemoReview(id)) return Response.json({ message: "Review not found." }, { status: 404 });
     return Response.json({ id });
   }
 
-  const supabase = createAdminClient();
-  const { error } = await supabase.from("reviews").delete().eq("id", id);
-
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-  return Response.json({ id });
+  try {
+    await execute("delete from reviews where id = ?", [id]);
+    return Response.json({ id });
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }

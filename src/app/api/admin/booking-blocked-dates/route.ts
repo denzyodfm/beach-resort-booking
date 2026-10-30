@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { requireResortManager } from "@/lib/admin-auth";
 import { normalizeBlockedDate } from "@/lib/booking-blocked-dates";
 import {
@@ -5,21 +7,22 @@ import {
   deleteServerBlockedDate,
   getServerBlockedDates,
 } from "@/lib/booking-blocked-dates-store";
-import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
+import { errorMessage, execute, hasDatabaseEnv, isMissingTableError, query, queryOne } from "@/lib/db";
 
 export async function GET() {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     return Response.json(getServerBlockedDates());
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase.from("booking_blackout_dates").select("*").order("blocked_date");
-
-  if (error) return Response.json({ message: getSetupMessage(error.message) }, { status: 500 });
-  return Response.json((data || []).map(normalizeBlockedDate));
+  try {
+    const data = await query("select * from booking_blackout_dates order by blocked_date");
+    return Response.json(data.map(normalizeBlockedDate));
+  } catch (error) {
+    return Response.json({ message: getSetupMessage(error) }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
@@ -34,7 +37,7 @@ export async function POST(request: Request) {
     return Response.json({ message: "Select a valid holiday date." }, { status: 400 });
   }
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     return Response.json(
       addServerBlockedDate({
         id: date,
@@ -46,15 +49,17 @@ export async function POST(request: Request) {
     );
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("booking_blackout_dates")
-    .upsert({ blocked_date: date, label }, { onConflict: "blocked_date" })
-    .select()
-    .single();
-
-  if (error) return Response.json({ message: getSetupMessage(error.message) }, { status: 500 });
-  return Response.json(normalizeBlockedDate(data), { status: 201 });
+  try {
+    await execute(
+      `insert into booking_blackout_dates (id, blocked_date, label) values (?, ?, ?)
+       on duplicate key update label = values(label)`,
+      [randomUUID(), date, label],
+    );
+    const data = await queryOne("select * from booking_blackout_dates where blocked_date = ?", [date]);
+    return Response.json(normalizeBlockedDate(data || {}), { status: 201 });
+  } catch (error) {
+    return Response.json({ message: getSetupMessage(error) }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: Request) {
@@ -65,23 +70,24 @@ export async function DELETE(request: Request) {
   const id = searchParams.get("id") || "";
   if (!id) return Response.json({ message: "Missing holiday id." }, { status: 400 });
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     const deleted = deleteServerBlockedDate(id);
     if (!deleted) return Response.json({ message: "Holiday date not found." }, { status: 404 });
     return Response.json(deleted);
   }
 
-  const supabase = createAdminClient();
-  const { error } = await supabase.from("booking_blackout_dates").delete().eq("id", id);
-
-  if (error) return Response.json({ message: getSetupMessage(error.message) }, { status: 500 });
-  return Response.json({ id });
+  try {
+    await execute("delete from booking_blackout_dates where id = ?", [id]);
+    return Response.json({ id });
+  } catch (error) {
+    return Response.json({ message: getSetupMessage(error) }, { status: 500 });
+  }
 }
 
-function getSetupMessage(message: string) {
-  if (message.includes("booking_blackout_dates")) {
-    return "Holiday table is not ready. Run the Supabase schema update for booking_blackout_dates.";
+function getSetupMessage(error: unknown) {
+  if (isMissingTableError(error)) {
+    return "Holiday table is not ready. Run mysql/schema.sql to create booking_blackout_dates.";
   }
 
-  return message;
+  return errorMessage(error);
 }

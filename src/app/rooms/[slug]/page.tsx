@@ -1,5 +1,8 @@
 import Link from "next/link";
+import { CalendarCheck } from "lucide-react";
 import { notFound } from "next/navigation";
+import { BookingChannelBadge } from "@/components/booking-channel-badge";
+import { getBookingChannel } from "@/lib/booking-settings";
 import { rooms } from "@/lib/resort-data";
 import { getRoomBySlugFromCatalog } from "@/lib/rooms-server";
 
@@ -76,9 +79,24 @@ export default async function RoomDetailPage(props: PageProps<"/rooms/[slug]">) 
             <span>{room.bathrooms} baths</span>
             <span>{room.size}</span>
           </div>
-          <Link href={`/booking?room=${room.id}`} className="mt-8 block rounded-full bg-bolihon-green px-5 py-3 text-center font-semibold text-white transition hover:bg-bolihon-green-dark">
-            Book this cottage
-          </Link>
+          <BookingChannelBadge room={room} className="mt-6" />
+          {getBookingChannel(room) === "walk_in" ? (
+            <p className="mt-4 rounded-xl border-2 border-slate-300 bg-slate-50 p-4 text-sm text-slate-700">
+              <strong className="block text-base text-slate-950">Walk-in guests only</strong>
+              This cottage is kept for guests who book at the resort and cannot be reserved online.{" "}
+              <Link href="/booking-by-date" className="font-semibold text-cyan-700 underline">See online cottages</Link>
+            </p>
+          ) : (
+            <>
+              <Link href={`/booking?room=${room.id}`} className="mt-4 flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-center font-semibold text-white transition hover:bg-bolihon-green-dark">
+                <CalendarCheck aria-hidden="true" className="h-5 w-5 shrink-0" />
+                Book this cottage
+              </Link>
+              <p className="mt-2 text-center text-xs text-slate-500">
+                Choosing this exact cottage is a Premium booking. Pay online within the deadline shown after booking.
+              </p>
+            </>
+          )}
         </aside>
       </section>
     </article>

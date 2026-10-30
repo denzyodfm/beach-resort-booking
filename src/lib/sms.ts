@@ -1,3 +1,6 @@
+import { formatDeadline } from "@/lib/booking-settings";
+import { getDirectionsUrl } from "@/lib/resort-location";
+
 type BookingSmsPayload = {
   to?: string;
   guestName: string;
@@ -6,6 +9,7 @@ type BookingSmsPayload = {
   checkIn: string;
   checkOut: string;
   totalAmount: number;
+  paymentDeadline?: string;
 };
 
 export async function sendBookingConfirmationSms(payload: BookingSmsPayload) {
@@ -31,7 +35,10 @@ export async function sendBookingConfirmationSms(payload: BookingSmsPayload) {
     `Hi ${payload.guestName}, your pending BOLIHON booking ${payload.bookingId} for ${payload.cottageName} has been recorded.`,
     `Dates: ${payload.checkIn} to ${payload.checkOut}.`,
     `Total: Php${payload.totalAmount.toLocaleString()}.`,
-    "Please complete payment so an admin can confirm your booking.",
+    payload.paymentDeadline
+      ? `Pay online and submit your reference no. before ${formatDeadline(payload.paymentDeadline)} or the booking is cancelled automatically.`
+      : "Please complete payment so an admin can confirm your booking.",
+    `Directions: ${getDirectionsUrl()}`,
   ].join(" ");
 
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {

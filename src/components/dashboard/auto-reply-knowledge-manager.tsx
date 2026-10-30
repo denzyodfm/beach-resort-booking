@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Plus, Save, Trash2 } from "lucide-react";
 import { normalizeKnowledgeItem, type AutoReplyKnowledgeItem } from "@/lib/auto-reply-knowledge";
 import { refreshAutoReplyKnowledge } from "@/lib/demo-chat";
 import { useDemoAuth } from "@/lib/demo-auth";
 
 type KnowledgeResponse = {
   items: AutoReplyKnowledgeItem[];
-  mode?: "demo" | "supabase" | "setup_required";
+  mode?: "demo" | "database" | "setup_required";
   message?: string;
 };
 
@@ -187,8 +188,9 @@ export function AutoReplyKnowledgeManager() {
         <button
           type="button"
           onClick={startNewItem}
-          className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark"
+          className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark"
         >
+          <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />
           Add information
         </button>
       </div>
@@ -251,16 +253,18 @@ export function AutoReplyKnowledgeManager() {
           <div className="flex flex-col gap-3 sm:flex-row">
             <button
               disabled={saving}
-              className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:bg-slate-300"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:bg-slate-300"
             >
+              {selectedExists ? <Save aria-hidden="true" className="h-4 w-4 shrink-0" /> : <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />}
               {selectedExists ? "Save information" : "Create information"}
             </button>
             <button
               type="button"
               onClick={deleteItem}
               disabled={!selectedExists || saving}
-              className="rounded-full border border-rose-200 px-5 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-rose-200 px-5 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
             >
+              <Trash2 aria-hidden="true" className="h-4 w-4 shrink-0" />
               Delete
             </button>
           </div>

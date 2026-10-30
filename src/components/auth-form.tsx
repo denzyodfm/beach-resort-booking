@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Loader2, LogIn } from "lucide-react";
 import { useDemoAuth } from "@/lib/demo-auth";
 
 export function AuthForm() {
@@ -20,19 +21,7 @@ export function AuthForm() {
     try {
       if (!identifier.trim() || !password) throw new Error("Enter your username or email and password.");
 
-      let email = identifier.trim();
-      if (!email.includes("@")) {
-        const response = await fetch("/api/auth/resolve-login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ identifier: email }),
-        });
-        const result = (await response.json()) as { email?: string; message?: string };
-        if (!response.ok || !result.email) throw new Error(result.message || "Invalid username/email or password.");
-        email = result.email;
-      }
-
-      await loginWithPassword(email, password);
+      await loginWithPassword(identifier.trim(), password);
       router.push("/admin");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to sign in.");
@@ -52,7 +41,8 @@ export function AuthForm() {
       </div>
       <Field label="Username or email" value={identifier} onChange={setIdentifier} autoComplete="username" />
       <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
-      <button disabled={submitting} className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300">
+      <button disabled={submitting} className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300">
+        {submitting ? <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin" /> : <LogIn aria-hidden="true" className="h-4 w-4 shrink-0" />}
         {submitting ? "Signing in..." : "Sign in"}
       </button>
       {message ? <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">{message}</p> : null}

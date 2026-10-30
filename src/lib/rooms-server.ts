@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
+import { hasDatabaseEnv, parseJsonArray, query, type DbRow } from "@/lib/db";
 import {
   defaultCategories,
   normalizeCategory,
@@ -9,35 +9,62 @@ import {
 } from "@/lib/resort-data";
 import type { CottageCategory, Room } from "@/lib/types";
 
-export async function getRoomCatalog(options: { includeInactive?: boolean } = {}): Promise<{ rooms: Room[]; categories: CottageCategory[] }> {
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return { rooms: fallbackRooms, categories: defaultCategories };
-  }
-
-  const supabase = createAdminClient();
-  let roomsQuery = supabase
-    .from("rooms")
-    .select("*, room_images(image_url), room_amenities(amenities(name))")
-    .order("sort_order");
-
-  if (!options.includeInactive) roomsQuery = roomsQuery.eq("is_active", true);
-
-  const [{ data: categoryRows, error: categoryError }, { data: roomRows, error: roomError }] = await Promise.all([
-    supabase.from("room_categories").select("*").order("sort_order"),
-    roomsQuery,
+/**
+ * Room rows in the shape normalizeRoom expects: snake_case columns plus nested
+ * room_images and room_amenities arrays.
+ */
+export async function fetchRoomRows(options: { includeInactive?: boolean } = {}) {
+  const [roomRows, imageRows, amenityRows] = await Promise.all([
+    query(`select * from rooms ${options.includeInactive ? "" : "where is_active = 1"} order by sort_order`),
+    query("select room_id, image_url from room_images order by is_primary desc, sort_order, created_at"),
+    query(
+      "select ra.room_id, a.name from room_amenities ra join amenities a on a.id = ra.amenity_id order by a.name",
+    ),
   ]);
 
-  if (categoryError || roomError) {
+  const imagesByRoom = groupBy(imageRows, (row) => ({ image_url: String(row.image_url) }));
+  const amenitiesByRoom = groupBy(amenityRows, (row) => ({ amenities: { name: String(row.name) } }));
+
+  return roomRows.map((room) => ({
+    ...room,
+    booking_includes: parseJsonArray(room.booking_includes),
+    room_images: imagesByRoom.get(String(room.id)) || [],
+    room_amenities: amenitiesByRoom.get(String(room.id)) || [],
+  }));
+}
+
+export async function fetchCategoryRows() {
+  return query("select * from room_categories order by sort_order");
+}
+
+export async function getRoomCatalog(options: { includeInactive?: boolean } = {}): Promise<{ rooms: Room[]; categories: CottageCategory[] }> {
+  if (!hasDatabaseEnv()) {
     return { rooms: fallbackRooms, categories: defaultCategories };
   }
 
-  const categories = categoryRows?.length ? categoryRows.map(normalizeCategory) : defaultCategories;
-  const normalizedRooms = roomRows?.length ? roomRows.map((room) => normalizeRoom(room, categories)) : fallbackRooms;
+  try {
+    const [categoryRows, roomRows] = await Promise.all([fetchCategoryRows(), fetchRoomRows(options)]);
+    const categories = categoryRows.length ? categoryRows.map(normalizeCategory) : defaultCategories;
+    const normalizedRooms = roomRows.length ? roomRows.map((room) => normalizeRoom(room, categories)) : fallbackRooms;
 
-  return { rooms: normalizedRooms, categories };
+    return { rooms: normalizedRooms, categories };
+  } catch {
+    return { rooms: fallbackRooms, categories: defaultCategories };
+  }
 }
 
 export async function getRoomBySlugFromCatalog(slug: string) {
   const catalog = await getRoomCatalog();
   return catalog.rooms.find((room) => room.slug === slug);
+}
+
+function groupBy<T>(rows: DbRow[], map: (row: DbRow) => T) {
+  const grouped = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = String(row.room_id);
+    const list = grouped.get(key) || [];
+    list.push(map(row));
+    grouped.set(key, list);
+  }
+  return grouped;
 }

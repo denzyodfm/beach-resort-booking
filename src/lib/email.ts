@@ -1,3 +1,6 @@
+import { formatDeadline } from "@/lib/booking-settings";
+import { getDirectionsUrl } from "@/lib/resort-location";
+
 type BookingEmailPayload = {
   to?: string;
   guestName: string;
@@ -6,6 +9,7 @@ type BookingEmailPayload = {
   checkIn: string;
   checkOut: string;
   totalAmount: number;
+  paymentDeadline?: string;
 };
 
 export async function sendBookingConfirmationEmail(payload: BookingEmailPayload) {
@@ -43,7 +47,11 @@ export async function sendBookingConfirmationEmail(payload: BookingEmailPayload)
         `Dates: ${payload.checkIn} to ${payload.checkOut}`,
         `Total: Php${payload.totalAmount.toLocaleString()}`,
         "",
-        "Please complete payment so an admin can confirm your booking.",
+        payload.paymentDeadline
+          ? `Payment deadline: ${formatDeadline(payload.paymentDeadline)}. Pay online and submit your payment reference number on the Pay / Track booking page before then, or this booking is cancelled automatically.`
+          : "Please complete payment so an admin can confirm your booking.",
+        "",
+        `Directions to the resort: ${getDirectionsUrl()}`,
         "",
         "BOLIHON Cove",
       ].join("\n"),

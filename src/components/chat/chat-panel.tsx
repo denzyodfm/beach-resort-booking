@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { MessageCirclePlus, Send } from "lucide-react";
 import {
   addMessage,
   getConversations,
@@ -145,7 +146,8 @@ export function ChatPanel() {
             required
             className="min-h-12 rounded-md border border-slate-300 px-4 outline-none ring-bolihon-green focus:ring-2"
           />
-          <button className="rounded-full bg-bolihon-green px-6 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark">
+          <button className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-6 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark">
+            <MessageCirclePlus aria-hidden="true" className="h-4 w-4 shrink-0" />
             Start chat
           </button>
         </form>
@@ -195,8 +197,9 @@ export function ChatPanel() {
           <button
             type="submit"
             disabled={!selected || !draft.trim()}
-            className="rounded-full bg-bolihon-green px-6 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-6 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
           >
+            <Send aria-hidden="true" className="h-4 w-4 shrink-0" />
             Send
           </button>
         </form>
@@ -277,8 +280,9 @@ export function ChatPanel() {
           />
           <button
             disabled={!selected || !draft.trim()}
-            className="rounded-full bg-bolihon-green px-6 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-6 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
           >
+            <Send aria-hidden="true" className="h-4 w-4 shrink-0" />
             Send
           </button>
         </form>

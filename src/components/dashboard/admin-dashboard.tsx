@@ -1,18 +1,69 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlarmClock,
+  Aperture,
+  BadgeCheck,
+  Ban,
+  BookOpen,
+  CalendarDays,
+  CalendarX,
+  Camera,
+  CameraOff,
+  BellRing,
+  Bot,
+  CheckCircle2,
+  ChevronLeft,
+  ClipboardCheck,
+  Clock,
+  Eye,
+  Hourglass,
+  Pencil,
+  Printer,
+  ReceiptText,
+  SlidersHorizontal,
+  Users,
+  ChevronRight,
+  EyeOff,
+  House,
+  Image as ImageIcon,
+  LayoutDashboard,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Save,
+  Settings,
+  Star,
+  Trash2,
+  Undo2,
+  UserCog,
+  UserPlus,
+  Wallet,
+  X,
+  XCircle,
+} from "lucide-react";
 import { isPaidEnoughToConfirm } from "@/lib/booking-logic";
 import { AutoReplyKnowledgeManager } from "@/components/dashboard/auto-reply-knowledge-manager";
+import { FooterBrandingSettings } from "@/components/dashboard/footer-branding-settings";
+import { OnlineBookingSettings } from "@/components/dashboard/online-booking-settings";
+import { useNow } from "@/components/booking/payment-panel";
+import { readBookingExtras } from "@/lib/booking-row";
+import { openSalesInvoice } from "@/lib/sales-invoice";
+import { bookingStatusLabel, formatDeadline, formatTimeLeft, paymentStatusLabel } from "@/lib/booking-settings";
+import { ManualLibrary } from "@/components/dashboard/manual-library";
+import { DraggableTabs, readTabOrder, TabbedSections, type DraggableTab } from "@/components/dashboard/draggable-tabs";
 import type { BookingBlockedDate } from "@/lib/booking-blocked-dates";
 import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
 import { useDemoAuth } from "@/lib/demo-auth";
 import { nightsBetween, rooms, sampleBookings } from "@/lib/resort-data";
-import { hasSupabaseEnv } from "@/lib/supabase-browser";
+import { hasPersistentBackend } from "@/lib/backend-mode";
 import type { Booking, BookingStatus, CottageCategory, PaymentLog, PaymentStatus, Review, Room } from "@/lib/types";
 
 type BookingAction = "approve" | "cancel";
-type PaymentAction = "verify" | "refund";
+type PaymentAction = "verify" | "refund" | "reject_reference";
 type PaymentDetails = {
+  reference: string;
   note: string;
   amountPaid: number;
   proofUrl: string;
@@ -48,7 +99,17 @@ type CottageCatalogResponse = {
   rooms: Room[];
   categories: CottageCategory[];
 };
-type AdminTab = "overview" | "bookings" | "payments" | "cottages" | "reviews" | "settings";
+type AdminTab = "overview" | "bookings" | "payments" | "cottages" | "reviews" | "settings" | "manual";
+type BookingsTab = "approvals" | "calendar" | "blocked";
+
+const adminTabOrderKey = "bolihon-admin-tab-order";
+const bookingsTabOrderKey = "bolihon-admin-bookings-tab-order";
+const paymentsTabOrderKey = "bolihon-admin-payments-tab-order";
+const cottagesTabOrderKey = "bolihon-admin-cottages-tab-order";
+const reviewsTabOrderKey = "bolihon-admin-reviews-tab-order";
+const settingsTabOrderKey = "bolihon-admin-settings-tab-order";
+const adminTabIds: AdminTab[] = ["overview", "bookings", "payments", "cottages", "reviews", "settings", "manual"];
+const bookingsTabIds: BookingsTab[] = ["approvals", "calendar", "blocked"];
 
 const defaultAmenityOptions = [
   "Air conditioning",
@@ -183,6 +244,7 @@ function normalizeBooking(row: Booking | Record<string, unknown>): Booking {
     refundAmount: paymentDetails.refundAmount,
     refundReason: paymentDetails.refundReason,
     createdAt: String(source.createdAt || source.created_at || new Date().toISOString()).slice(0, 10),
+    ...readBookingExtras(source),
   };
 }
 
@@ -192,13 +254,19 @@ export function AdminDashboard() {
   const [cottages, setCottages] = useState(rooms);
   const [categories, setCategories] = useState<CottageCategory[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
-  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  // The dashboard only renders in the browser after sign-in, so the saved order can be read on first render.
+  const [tabOrder, setTabOrder] = useState<AdminTab[]>(() => readTabOrder(adminTabOrderKey, adminTabIds));
+  const [activeTab, setActiveTab] = useState<AdminTab>(
+    () => tabOrder.find((id) => id !== "settings" || user?.role === "admin") || "overview",
+  );
+  // Controlled here so the "auto-cancel soon" banner can jump straight to approvals.
+  const [bookingsTab, setBookingsTab] = useState<BookingsTab>(() => readTabOrder(bookingsTabOrderKey, bookingsTabIds)[0]);
 
   useEffect(() => {
-    const supabaseConfigured = hasSupabaseEnv();
+    const backendConfigured = hasPersistentBackend();
 
     const syncBookings = () => {
-      if (!supabaseConfigured) {
+      if (!backendConfigured) {
         setBookings(getDemoBookings().map(normalizeBooking));
       }
 
@@ -206,7 +274,7 @@ export function AdminDashboard() {
         .then((response) => (response.ok ? response.json() : Promise.reject()))
         .then((rows: Array<Booking | Record<string, unknown>>) => {
           const apiBookings = rows.map(normalizeBooking);
-          if (supabaseConfigured) {
+          if (backendConfigured) {
             setBookings(apiBookings);
             return;
           }
@@ -299,7 +367,7 @@ export function AdminDashboard() {
         if (action === "approve" && !isPaidEnoughToConfirm(booking.paymentStatus)) return booking;
 
         const status = action === "approve" ? "confirmed" : "cancelled";
-        if (!hasSupabaseEnv()) updateDemoBooking(id, { status });
+        if (!hasPersistentBackend()) updateDemoBooking(id, { status });
         fetch("/api/admin/bookings", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -310,7 +378,32 @@ export function AdminDashboard() {
     );
   }
 
+  function reportPaymentError(response: Response) {
+    if (response.ok) return;
+    void response
+      .json()
+      .catch(() => ({}))
+      .then((result: { message?: string }) => {
+        window.alert(result.message || "The payment update was not saved.");
+        window.dispatchEvent(new Event("bolihon-bookings-updated"));
+      });
+  }
+
   function updatePayment(id: string, action: PaymentAction, details?: PaymentDetails | RefundDetails) {
+    if (action === "reject_reference") {
+      fetch("/api/admin/bookings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, rejectReference: true }),
+      })
+        .then((response) => {
+          reportPaymentError(response);
+          window.dispatchEvent(new Event("bolihon-bookings-updated"));
+        })
+        .catch(() => undefined);
+      return;
+    }
+
     setBookings((current) =>
       current.map((booking) =>
         booking.id === id
@@ -336,7 +429,7 @@ export function AdminDashboard() {
                       id: `PAY-${Date.now()}`,
                       type: "payment",
                       amount: paymentDetails.amountPaid,
-                      note: paymentDetails.note,
+                      note: [paymentDetails.reference ? `Ref ${paymentDetails.reference}` : "", paymentDetails.note].filter(Boolean).join(" · "),
                       proofName: paymentDetails.proofName,
                       paidBy: paymentDetails.paidBy,
                       actorName,
@@ -365,7 +458,7 @@ export function AdminDashboard() {
                 refundAmount: action === "refund" ? refundDetails?.amount || 0 : booking.refundAmount,
                 refundReason: action === "refund" ? refundDetails?.reason || "" : booking.refundReason,
               };
-              if (!hasSupabaseEnv()) updateDemoBooking(id, updates);
+              if (!hasPersistentBackend()) updateDemoBooking(id, updates);
               fetch("/api/admin/bookings", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
@@ -379,31 +472,53 @@ export function AdminDashboard() {
                   paymentHistory: updates.paymentHistory,
                   refundAmount: updates.refundAmount,
                   refundReason: updates.refundReason,
+                  ...(paymentDetails?.reference ? { paymentReference: paymentDetails.reference } : {}),
                 }),
-              }).catch(() => undefined);
-              return { ...booking, ...updates };
+              })
+                .then(reportPaymentError)
+                .catch(() => undefined);
+              return {
+                ...booking,
+                ...updates,
+                paymentReference: paymentDetails?.reference || booking.paymentReference,
+              };
             })()
           : booking,
       ),
     );
   }
 
+  const pendingCount = bookings.filter((booking) => booking.status === "pending").length;
+  const referencesToVerify = bookings.filter((booking) => booking.status === "pending" && booking.paymentStatus === "authorized").length;
+  const adminTabs: DraggableTab<AdminTab>[] = [
+    { id: "overview", label: "Overview", icon: LayoutDashboard },
+    { id: "bookings", label: "Bookings", icon: CalendarDays, badge: pendingCount },
+    { id: "payments", label: "Payments", icon: Wallet, badge: referencesToVerify },
+    { id: "cottages", label: "Cottages", icon: House },
+    { id: "reviews", label: "Reviews", icon: Star },
+    ...(user?.role === "admin" ? [{ id: "settings" as const, label: "Users & settings", icon: Settings }] : []),
+    { id: "manual", label: "Manual", icon: BookOpen },
+  ];
+  const pendingReviews = reviews.filter((review) => review.status === "pending").length;
+
   return (
     <div className="grid gap-6">
-      <nav aria-label="Admin sections" className="sticky top-[112px] z-30 flex gap-2 overflow-x-auto rounded-xl border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur">
-        {([
-          ["overview", "Overview"],
-          ["bookings", "Bookings"],
-          ["payments", "Payments"],
-          ["cottages", "Cottages"],
-          ["reviews", "Reviews"],
-          ...(user?.role === "admin" ? [["settings", "Users & settings"]] : []),
-        ] as Array<[AdminTab, string]>).map(([id, label]) => (
-          <button key={id} type="button" onClick={() => setActiveTab(id)} className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-bold transition ${activeTab === id ? "bg-bolihon-green text-white" : "text-slate-600 hover:bg-slate-100"}`}>
-            {label}
-          </button>
-        ))}
+      <nav aria-label="Admin sections" className="sticky top-[80px] sm:top-[88px] lg:top-[132px] z-30 rounded-xl border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur">
+        <DraggableTabs
+          ariaLabel="Admin sections"
+          storageKey={adminTabOrderKey}
+          tabs={adminTabs}
+          order={tabOrder}
+          onOrderChange={setTabOrder}
+          active={activeTab}
+          onSelect={setActiveTab}
+        />
       </nav>
+
+      <PaymentAlerts bookings={bookings} onOpenPayments={() => setActiveTab("payments")} onOpenBookings={() => {
+        setActiveTab("bookings");
+        setBookingsTab("approvals");
+      }} />
 
       {activeTab === "overview" ? <>
         <HeroSummary totalRevenue={stats.revenue} upcomingCount={stats.upcoming.length} />
@@ -415,26 +530,65 @@ export function AdminDashboard() {
         </section>
       </> : null}
 
-      {activeTab === "bookings" ? <>
-        <HolidayDateManagement />
-        <CalendarView bookings={bookings} />
-        <BookingQueue bookings={bookings} onAction={updateBooking} />
-      </> : null}
+      {activeTab === "bookings" ? (
+        <TabbedSections
+          ariaLabel="Bookings sections"
+          storageKey={bookingsTabOrderKey}
+          active={bookingsTab}
+          onActiveChange={setBookingsTab}
+          sections={[
+            { id: "approvals", label: "Booking approvals", icon: ClipboardCheck, badge: pendingCount, content: <BookingQueue bookings={bookings} onAction={updateBooking} /> },
+            { id: "calendar", label: "Occupancy calendar", icon: CalendarDays, content: <CalendarView bookings={bookings} /> },
+            { id: "blocked", label: "No-booking dates", icon: CalendarX, content: <HolidayDateManagement /> },
+          ]}
+        />
+      ) : null}
 
-      {activeTab === "payments" ? <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <UpcomingCheckIns bookings={stats.upcoming} />
-        <RecentPayments bookings={bookings} onAction={updatePayment} />
-      </section> : null}
+      {activeTab === "payments" ? (
+        <TabbedSections
+          ariaLabel="Payments sections"
+          storageKey={paymentsTabOrderKey}
+          sections={[
+            { id: "verify", label: "References to verify", icon: BellRing, badge: referencesToVerify, content: <ReferenceVerificationQueue bookings={bookings} onAction={updatePayment} /> },
+            { id: "recent", label: "Recent payments", icon: ReceiptText, content: <RecentPayments bookings={bookings} onAction={updatePayment} /> },
+            { id: "check-ins", label: "Upcoming check-ins", icon: Clock, content: <UpcomingCheckIns bookings={stats.upcoming} /> },
+          ]}
+        />
+      ) : null}
 
-      {activeTab === "reviews" ? <ReviewModeration reviews={reviews} onUpdate={setReviews} /> : null}
-      {activeTab === "cottages" ? <>
-        <CottageManagement cottages={cottages} categories={categories} onUpdate={setCottages} onCategoriesUpdate={setCategories} onReload={loadCatalog} />
-        <RoomAvailability cottages={cottages} bookings={bookings} />
-      </> : null}
-      {activeTab === "settings" && user?.role === "admin" ? <>
-        <UserAdministration />
-        <AutoReplyKnowledgeManager />
-      </> : null}
+      {activeTab === "reviews" ? (
+        <TabbedSections
+          ariaLabel="Reviews sections"
+          storageKey={reviewsTabOrderKey}
+          sections={[
+            { id: "pending", label: "Pending approval", icon: Hourglass, badge: pendingReviews, content: <ReviewModeration reviews={reviews} onUpdate={setReviews} view="pending" /> },
+            { id: "published", label: "Published", icon: Eye, content: <ReviewModeration reviews={reviews} onUpdate={setReviews} view="published" /> },
+          ]}
+        />
+      ) : null}
+      {activeTab === "cottages" ? (
+        <TabbedSections
+          ariaLabel="Cottages sections"
+          storageKey={cottagesTabOrderKey}
+          sections={[
+            { id: "editor", label: "Cottage editor", icon: Pencil, content: <CottageManagement cottages={cottages} categories={categories} onUpdate={setCottages} onCategoriesUpdate={setCategories} onReload={loadCatalog} /> },
+            { id: "availability", label: "Cottage availability", icon: House, content: <RoomAvailability cottages={cottages} bookings={bookings} /> },
+          ]}
+        />
+      ) : null}
+      {activeTab === "settings" && user?.role === "admin" ? (
+        <TabbedSections
+          ariaLabel="Settings sections"
+          storageKey={settingsTabOrderKey}
+          sections={[
+            { id: "online-booking", label: "Online booking & fees", icon: SlidersHorizontal, content: <OnlineBookingSettings /> },
+            { id: "users", label: "Users", icon: Users, content: <UserAdministration /> },
+            { id: "auto-reply", label: "Auto-reply", icon: Bot, content: <AutoReplyKnowledgeManager /> },
+            { id: "footer", label: "Footer credit", icon: Settings, content: <FooterBrandingSettings /> },
+          ]}
+        />
+      ) : null}
+      {activeTab === "manual" ? <ManualLibrary /> : null}
     </div>
   );
 }
@@ -650,16 +804,24 @@ function UserAdministration() {
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
               disabled={saving}
-              className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
             >
+              {saving ? (
+                <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin" />
+              ) : editing ? (
+                <Save aria-hidden="true" className="h-4 w-4 shrink-0" />
+              ) : (
+                <UserPlus aria-hidden="true" className="h-4 w-4 shrink-0" />
+              )}
               {saving ? "Saving..." : editing ? "Save changes" : "Create user"}
             </button>
             {editing ? (
               <button
                 type="button"
                 onClick={() => setForm(emptyUserForm())}
-                className="rounded-full border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-white"
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-white"
               >
+                <X aria-hidden="true" className="h-4 w-4 shrink-0" />
                 Cancel edit
               </button>
             ) : null}
@@ -676,8 +838,9 @@ function UserAdministration() {
             <button
               type="button"
               onClick={loadUsers}
-              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white"
             >
+              <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
               Refresh
             </button>
           </div>
@@ -704,15 +867,17 @@ function UserAdministration() {
                   <button
                     type="button"
                     onClick={() => editUser(user)}
-                    className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   >
+                    <UserCog aria-hidden="true" className="h-4 w-4 shrink-0" />
                     Edit
                   </button>
                   <button
                     type="button"
                     onClick={() => deleteUser(user)}
-                    className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
                   >
+                    <Trash2 aria-hidden="true" className="h-4 w-4 shrink-0" />
                     Delete
                   </button>
                 </div>
@@ -812,8 +977,13 @@ function HolidayDateManagement() {
           <EditField label="Holiday name" value={form.label} onChange={(label) => setForm((current) => ({ ...current, label }))} />
           <button
             disabled={saving || !form.date}
-            className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
           >
+            {saving ? (
+              <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin" />
+            ) : (
+              <CalendarX aria-hidden="true" className="h-4 w-4 shrink-0" />
+            )}
             {saving ? "Saving..." : "Add no-booking date"}
           </button>
           {message ? <p className="rounded-md bg-cyan-50 px-3 py-2 text-sm text-cyan-900">{message}</p> : null}
@@ -825,8 +995,9 @@ function HolidayDateManagement() {
             <button
               type="button"
               onClick={() => void loadDates()}
-              className="rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
             >
+              <RefreshCw aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
               Refresh
             </button>
           </div>
@@ -840,8 +1011,9 @@ function HolidayDateManagement() {
                 <button
                   type="button"
                   onClick={() => void deleteDate(date)}
-                  className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
                 >
+                  <Trash2 aria-hidden="true" className="h-4 w-4 shrink-0" />
                   Delete
                 </button>
               </article>
@@ -875,28 +1047,27 @@ function BookingQueue({
                 <button
                   onClick={() => onAction(booking.id, "approve")}
                   disabled={!isPaidEnoughToConfirm(booking.paymentStatus)}
-                  className="rounded-full bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                   title={
                     isPaidEnoughToConfirm(booking.paymentStatus)
                       ? "Confirm booking"
                       : "Verify payment before confirming this booking"
                   }
                 >
+                  <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0" />
                   Confirm after payment
                 </button>
                 <button
                   onClick={() => onAction(booking.id, "cancel")}
-                  className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
                 >
+                  <XCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
                   Decline
                 </button>
               </div>
             </div>
-            {!isPaidEnoughToConfirm(booking.paymentStatus) ? (
-              <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                Payment must be verified before this booking can be confirmed.
-              </p>
-            ) : null}
+            <PaymentReferenceLine booking={booking} />
+            <BookingPaymentState booking={booking} />
           </article>
         ))}
         {pending.length === 0 ? <EmptyState text="No booking approvals waiting." /> : null}
@@ -938,8 +1109,9 @@ function CalendarView({ bookings }: { bookings: Booking[] }) {
         <button
           type="button"
           onClick={() => moveMonth(-1)}
-          className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-bolihon-green hover:text-bolihon-green"
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-bolihon-green hover:text-bolihon-green"
         >
+          <ChevronLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
           Previous
         </button>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -969,9 +1141,10 @@ function CalendarView({ bookings }: { bookings: Booking[] }) {
         <button
           type="button"
           onClick={() => moveMonth(1)}
-          className="rounded-full bg-bolihon-green px-4 py-2 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark"
+          className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-4 py-2 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark"
         >
           Next
+          <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0" />
         </button>
           </div>
         </div>
@@ -1084,6 +1257,7 @@ function RecentPayments({
                   <>
               <BookingIdentity booking={booking} />
               <p className="mt-2 text-sm font-semibold text-slate-950">{formatPeso(booking.totalPrice)}</p>
+              <PaymentReferenceLine booking={booking} />
               {booking.paymentAmountPaid ? (
                 <p className="mt-1 text-xs font-bold text-slate-600">
                   {booking.paymentAmountPaid >= booking.totalPrice ? "Full payment" : "Partial payment"}:{" "}
@@ -1107,8 +1281,9 @@ function RecentPayments({
                       href={booking.paymentProofUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="mt-1 inline-flex font-semibold text-cyan-700 hover:text-cyan-900"
+                      className="mt-1 inline-flex items-center gap-1.5 font-semibold text-cyan-700 hover:text-cyan-900"
                     >
+                      <ImageIcon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
                       View proof{booking.paymentProofName ? `: ${booking.paymentProofName}` : ""}
                     </a>
                   ) : null}
@@ -1142,17 +1317,32 @@ function RecentPayments({
               {booking.paymentStatus !== "paid" && booking.paymentStatus !== "refunded" ? (
                 <button
                   onClick={() => setVerifyingBooking(booking)}
-                  className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
                 >
+                  {booking.paymentStatus === "deposit_paid" ? (
+                    <Wallet aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <BadgeCheck aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  )}
                   {booking.paymentStatus === "deposit_paid" ? "Pay balance" : "Verify"}
                 </button>
               ) : null}
               {booking.paymentStatus === "paid" || booking.paymentStatus === "deposit_paid" ? (
                 <button
                   onClick={() => setRefundingBooking(booking)}
-                  className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
+                  <Undo2 aria-hidden="true" className="h-4 w-4 shrink-0" />
                   Refund
+                </button>
+              ) : null}
+              {booking.paymentStatus === "paid" || booking.paymentStatus === "deposit_paid" ? (
+                <button
+                  onClick={() => openSalesInvoice(booking.id).catch((error: Error) => window.alert(error.message))}
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  <Printer aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  {booking.invoiceNumber ? "Invoice" : "Sales invoice"}
                 </button>
               ) : null}
             </div>
@@ -1230,8 +1420,9 @@ function RefundDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50"
           >
+            <X aria-hidden="true" className="h-4 w-4 shrink-0" />
             Close
           </button>
         </div>
@@ -1266,14 +1457,16 @@ function RefundDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
+            <X aria-hidden="true" className="h-4 w-4 shrink-0" />
             Cancel
           </button>
           <button
             type="submit"
-            className="rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
           >
+            <Undo2 aria-hidden="true" className="h-4 w-4 shrink-0" />
             Save refund
           </button>
         </div>
@@ -1293,6 +1486,8 @@ function PaymentVerificationDialog({
 }) {
   const remainingBalance = getRemainingBalance(booking);
   const suggestedAmount = remainingBalance || booking.totalPrice;
+  const [reference, setReference] = useState(booking.paymentReference || "");
+  const referenceRequired = booking.channel === "online";
   const [note, setNote] = useState(booking.paymentNote || "");
   const [amountPaid, setAmountPaid] = useState(String(suggestedAmount || ""));
   const [paidBy, setPaidBy] = useState(booking.guestName || "");
@@ -1421,7 +1616,18 @@ function PaymentVerificationDialog({
       return;
     }
 
+    const cleanReference = reference.replace(/\s+/g, "").toUpperCase();
+    if (referenceRequired && !cleanReference) {
+      setError("Online bookings are paid online. Enter the reference number from the GCash or bank record.");
+      return;
+    }
+    if (cleanReference && !/^[A-Z0-9-]{6,40}$/.test(cleanReference)) {
+      setError("Reference numbers are 6 to 40 letters or digits.");
+      return;
+    }
+
     onSubmit({
+      reference: cleanReference,
       note: note.trim(),
       amountPaid: parsedAmount,
       paidBy: paidBy.trim() || booking.guestName,
@@ -1449,13 +1655,37 @@ function PaymentVerificationDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50"
           >
+            <X aria-hidden="true" className="h-4 w-4 shrink-0" />
             Close
           </button>
         </div>
 
-        <label htmlFor="payment-note" className="mt-5 block text-sm font-semibold text-slate-700">
+        {booking.paymentReference ? (
+          <div className="mt-5 rounded-lg border-2 border-cyan-600 bg-cyan-50 p-3 text-sm text-cyan-950">
+            <p className="font-bold">Guest submitted reference no.</p>
+            <p className="mt-1 font-mono text-2xl font-black tracking-wider">{booking.paymentReference}</p>
+            <p className="mt-1 text-xs">
+              Find this reference in the GCash or bank account and check the amount before saving. If it does not exist,
+              close this window and tap <strong>Reject reference</strong>.
+            </p>
+          </div>
+        ) : null}
+
+        <label htmlFor="payment-reference" className="mt-5 block text-sm font-semibold text-slate-700">
+          Payment reference no.{referenceRequired ? " (required — online booking)" : " (optional)"}
+        </label>
+        <input
+          id="payment-reference"
+          value={reference}
+          onChange={(event) => setReference(event.target.value)}
+          required={referenceRequired}
+          placeholder="GCash / bank reference number"
+          className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 font-mono text-sm outline-none ring-cyan-600 focus:ring-2"
+        />
+
+        <label htmlFor="payment-note" className="mt-4 block text-sm font-semibold text-slate-700">
           Payment details
         </label>
         <textarea
@@ -1510,16 +1740,24 @@ function PaymentVerificationDialog({
               type="button"
               onClick={cameraActive ? stopCamera : startCamera}
               disabled={cameraLoading}
-              className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-200"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-200"
             >
+              {cameraActive ? (
+                <CameraOff aria-hidden="true" className="h-4 w-4 shrink-0" />
+              ) : cameraLoading ? (
+                <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin" />
+              ) : (
+                <Camera aria-hidden="true" className="h-4 w-4 shrink-0" />
+              )}
               {cameraActive ? "Stop camera" : cameraLoading ? "Opening camera..." : "Use camera"}
             </button>
             {cameraActive ? (
               <button
                 type="button"
                 onClick={capturePhoto}
-                className="rounded-full bg-cyan-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800"
               >
+                <Aperture aria-hidden="true" className="h-4 w-4 shrink-0" />
                 Capture photo
               </button>
             ) : null}
@@ -1545,15 +1783,17 @@ function PaymentVerificationDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
+            <X aria-hidden="true" className="h-4 w-4 shrink-0" />
             Cancel
           </button>
           <button
             type="submit"
             disabled={Boolean(error)}
-            className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
+            <BadgeCheck aria-hidden="true" className="h-4 w-4 shrink-0" />
             Save and mark paid
           </button>
         </div>
@@ -1565,9 +1805,11 @@ function PaymentVerificationDialog({
 function ReviewModeration({
   reviews,
   onUpdate,
+  view,
 }: {
   reviews: Review[];
   onUpdate: React.Dispatch<React.SetStateAction<Review[]>>;
+  view: "pending" | "published";
 }) {
   const pending = reviews.filter((review) => review.status === "pending");
   const published = reviews.filter((review) => review.status === "published");
@@ -1609,11 +1851,9 @@ function ReviewModeration({
   }
 
   return (
-    <Panel title="Review approvals" eyebrow="Guest feedback">
-      <div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]">
-        <div>
-          <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-500">Pending approval</h3>
-          <div className="mt-3 grid gap-3">
+    <Panel title={view === "pending" ? "Reviews waiting for approval" : "Published reviews"} eyebrow="Guest feedback">
+      {view === "pending" ? (
+          <div className="grid gap-3 lg:grid-cols-2">
             {pending.map((review) => (
               <ReviewAdminCard
                 key={review.id}
@@ -1625,11 +1865,9 @@ function ReviewModeration({
             ))}
             {pending.length === 0 ? <EmptyState text="No reviews waiting for approval." /> : null}
           </div>
-        </div>
-        <div>
-          <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-500">Published</h3>
-          <div className="mt-3 grid gap-3">
-            {published.slice(0, 4).map((review) => (
+      ) : (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {published.map((review) => (
               <ReviewAdminCard
                 key={review.id}
                 review={review}
@@ -1640,8 +1878,7 @@ function ReviewModeration({
             ))}
             {published.length === 0 ? <EmptyState text="No published reviews yet." /> : null}
           </div>
-        </div>
-      </div>
+      )}
       {message ? <p className="mt-4 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{message}</p> : null}
     </Panel>
   );
@@ -1682,15 +1919,21 @@ function ReviewAdminCard({
         <button
           type="button"
           onClick={onPrimary}
-          className="rounded-full bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800"
+          className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800"
         >
+          {primaryLabel === "Unpublish" ? (
+            <EyeOff aria-hidden="true" className="h-4 w-4 shrink-0" />
+          ) : (
+            <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0" />
+          )}
           {primaryLabel}
         </button>
         <button
           type="button"
           onClick={onDelete}
-          className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
         >
+          <Trash2 aria-hidden="true" className="h-4 w-4 shrink-0" />
           Delete
         </button>
       </div>
@@ -2000,22 +2243,25 @@ function CottageManagement({
             <button
               type="button"
               onClick={addCottage}
-              className="rounded-full bg-bolihon-green px-4 py-2 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-4 py-2 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark"
             >
+              <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />
               Add cottage
             </button>
             <button
               type="button"
               onClick={saveCottage}
-              className="rounded-full bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800"
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800"
             >
+              <Save aria-hidden="true" className="h-4 w-4 shrink-0" />
               Save cottage
             </button>
             <button
               type="button"
               onClick={deleteCottage}
-              className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
             >
+              <Trash2 aria-hidden="true" className="h-4 w-4 shrink-0" />
               Delete cottage
             </button>
           </div>
@@ -2085,8 +2331,9 @@ function CottageManagement({
                 onChange={(event) => updateSelected({ premiumFeeEnabled: event.target.checked })}
                 className="h-4 w-4"
               />
-              Add premium charge
+              Use a different premium charge for this cottage
             </label>
+            <p className="mt-1 pl-7 text-xs text-slate-500">Unticked: the resort-wide premium fee from Users &amp; settings applies when a guest picks this cottage.</p>
             {selected.onlineReservable === false ? <p className="mt-1 pl-7 text-xs text-slate-500">Not applicable to walk-in cottages.</p> : null}
             {selected.premiumFeeEnabled ? (
               <div className="mt-3">
@@ -2108,8 +2355,9 @@ function CottageManagement({
                 onChange={(event) => updateSelected({ reservationFeeEnabled: event.target.checked })}
                 className="h-4 w-4"
               />
-              Add reservation/service fee
+              Use a different reservation fee for this cottage
             </label>
+            <p className="mt-1 pl-7 text-xs text-slate-500">Unticked: the resort-wide reservation fee from Users &amp; settings applies.</p>
             {selected.onlineReservable === false ? <p className="mt-1 pl-7 text-xs text-slate-500">Not applicable to walk-in cottages.</p> : null}
             {selected.reservationFeeEnabled ? (
               <div className="mt-3">
@@ -2157,8 +2405,9 @@ function CottageManagement({
                   <button
                     type="button"
                     onClick={() => deleteInclude(include)}
-                    className="rounded-full border border-cyan-200 px-2 py-1 text-xs font-semibold text-cyan-800 hover:bg-white"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-full border border-cyan-200 px-2 py-1 text-xs font-semibold text-cyan-800 hover:bg-white"
                   >
+                    <Trash2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
                     Delete
                   </button>
                 </div>
@@ -2171,7 +2420,8 @@ function CottageManagement({
                 placeholder="Add booking include"
                 className="min-h-11 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none ring-cyan-600 focus:ring-2"
               />
-              <button className="rounded-full bg-cyan-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800">
+              <button className="inline-flex items-center justify-center gap-2 rounded-full bg-cyan-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800">
+                <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />
                 Add include
               </button>
             </form>
@@ -2205,8 +2455,9 @@ function CottageManagement({
                     <button
                       type="button"
                       onClick={() => deleteAmenity(amenity)}
-                      className="shrink-0 rounded-full border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                      className="inline-flex items-center justify-center gap-1.5 shrink-0 rounded-full border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
                     >
+                      <Trash2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
                       Delete
                     </button>
                   </div>
@@ -2220,7 +2471,8 @@ function CottageManagement({
                 placeholder="Add new amenity"
                 className="min-h-11 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none ring-cyan-600 focus:ring-2"
               />
-              <button className="rounded-full bg-bolihon-green px-5 py-2 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark">
+              <button className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-2 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark">
+                <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />
                 Add amenity
               </button>
             </form>
@@ -2240,8 +2492,9 @@ function CottageManagement({
               <button
                 type="button"
                 onClick={() => deleteCategory(category.id)}
-                className="mt-3 rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
+                className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-full border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
               >
+                <Trash2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
                 Delete category
               </button>
             </article>
@@ -2258,7 +2511,8 @@ function CottageManagement({
             value={categoryDraft.description}
             onChange={(description) => setCategoryDraft((current) => ({ ...current, description }))}
           />
-          <button className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark">
+          <button className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark">
+            <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />
             Add category
           </button>
         </form>
@@ -2359,19 +2613,202 @@ function RoomAvailabilityCard({ room, bookings }: { room: Room; bookings: Bookin
 function BookingIdentity({ booking }: { booking: Booking }) {
   return (
     <div className="min-w-0">
-      <p className="text-sm font-bold text-slate-950">{booking.id} - {booking.roomName}</p>
+      <p className="text-sm font-bold text-slate-950">{booking.bookingNumber || booking.id} - {booking.roomName}</p>
       <p className="mt-1 truncate text-sm text-slate-600">
         {booking.guestName} - {booking.guestPhone || "No cellphone"}{booking.guestEmail ? ` - ${booking.guestEmail}` : ""}
       </p>
-      <p className="mt-1 text-xs text-slate-500">{booking.checkIn} to {booking.checkOut}</p>
+      <p className="mt-1 text-xs text-slate-500">
+        {booking.checkIn} to {booking.checkOut}
+        {booking.channel ? (
+          <span className={`ml-2 rounded-full px-2 py-0.5 font-bold ${booking.channel === "online" ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-700"}`}>
+            {booking.channel === "online" ? "Online" : "Walk-in"}
+          </span>
+        ) : null}
+        {booking.bookingType ? (
+          <span className={`ml-1 rounded-full px-2 py-0.5 font-bold ${booking.bookingType === "premium" ? "bg-amber-100 text-amber-900" : "bg-cyan-50 text-cyan-800"}`}>
+            {booking.bookingType === "premium" ? "Premium" : "Standard"}
+          </span>
+        ) : null}
+      </p>
     </div>
   );
 }
 
+/** The guest's payment reference number, or that none has arrived yet. */
+function PaymentReferenceLine({ booking }: { booking: Booking }) {
+  if (booking.paymentReference) {
+    return (
+      <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md border-2 border-cyan-600 bg-cyan-50 px-3 py-2">
+        <span className="text-xs font-black uppercase tracking-[0.16em] text-cyan-800">Payment reference no.</span>
+        <span className="font-mono text-lg font-black tracking-wider text-cyan-950">{booking.paymentReference}</span>
+      </div>
+    );
+  }
+  if (booking.status === "cancelled" || booking.channel === "walk_in") return null;
+  if (booking.paymentStatus !== "unpaid") return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2">
+      <span className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Payment reference no.</span>
+      <span className="text-sm font-semibold text-slate-600">Not submitted yet — the guest enters it on Pay / Track Booking after paying online</span>
+    </div>
+  );
+}
+
+/** Deadline or reference status under a pending booking. */
+function BookingPaymentState({ booking }: { booking: Booking }) {
+  const now = useNow();
+  if (booking.paymentStatus === "authorized") {
+    return (
+      <p className="mt-3 rounded-md border-2 border-cyan-600 bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-950">
+        Reference submitted — match it with the GCash / bank record, then Verify in the Payments tab.
+      </p>
+    );
+  }
+  if (booking.paymentStatus === "unpaid" && booking.status === "pending" && booking.paymentDeadline) {
+    const urgent = new Date(booking.paymentDeadline).getTime() - now < 3 * 60 * 60 * 1000;
+    return (
+      <p className={`mt-3 rounded-md px-3 py-2 text-sm font-bold ${urgent ? "bg-rose-600 text-white" : "bg-amber-100 text-amber-950"}`}>
+        Unpaid · auto-cancels {formatDeadline(booking.paymentDeadline)} ({formatTimeLeft(booking.paymentDeadline, now)})
+      </p>
+    );
+  }
+  if (!isPaidEnoughToConfirm(booking.paymentStatus)) {
+    return (
+      <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        Payment must be verified before this booking can be confirmed.
+      </p>
+    );
+  }
+  return null;
+}
+
+/** Banner above every admin tab when payments need attention. */
+function PaymentAlerts({
+  bookings,
+  onOpenPayments,
+  onOpenBookings,
+}: {
+  bookings: Booking[];
+  onOpenPayments: () => void;
+  onOpenBookings: () => void;
+}) {
+  const now = useNow();
+  const toVerify = bookings.filter((booking) => booking.status === "pending" && booking.paymentStatus === "authorized");
+  const expiringSoon = bookings.filter(
+    (booking) =>
+      booking.status === "pending" &&
+      booking.paymentStatus === "unpaid" &&
+      booking.paymentDeadline &&
+      new Date(booking.paymentDeadline).getTime() - now < 6 * 60 * 60 * 1000,
+  );
+  if (!toVerify.length && !expiringSoon.length) return null;
+
+  return (
+    <section className="grid gap-3 md:grid-cols-2">
+      {toVerify.length ? (
+        <button
+          type="button"
+          onClick={onOpenPayments}
+          className="flex items-start gap-3 rounded-xl border-2 border-cyan-700 bg-cyan-700 p-4 text-left text-white shadow-lg transition hover:bg-cyan-800"
+        >
+          <BadgeCheck aria-hidden="true" className="mt-5 h-6 w-6 shrink-0" />
+          <span className="block min-w-0">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-100">Action needed</p>
+            <p className="mt-1 text-2xl font-black">{toVerify.length} payment reference{toVerify.length === 1 ? "" : "s"} to verify</p>
+            <p className="mt-1 text-sm text-cyan-50">Match each reference no. with the GCash / bank record → Payments tab</p>
+          </span>
+        </button>
+      ) : null}
+      {expiringSoon.length ? (
+        <button
+          type="button"
+          onClick={onOpenBookings}
+          className="flex items-start gap-3 rounded-xl border-2 border-rose-600 bg-rose-600 p-4 text-left text-white shadow-lg transition hover:bg-rose-700"
+        >
+          <AlarmClock aria-hidden="true" className="mt-5 h-6 w-6 shrink-0" />
+          <span className="block min-w-0">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-rose-100">Payment deadline</p>
+            <p className="mt-1 text-2xl font-black">{expiringSoon.length} unpaid booking{expiringSoon.length === 1 ? "" : "s"} auto-cancel within 6 hours</p>
+            <p className="mt-1 text-sm text-rose-50">They are cancelled automatically if no payment reference arrives → Bookings tab</p>
+          </span>
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+/** Every booking whose guest submitted a payment reference that staff have not checked yet. */
+function ReferenceVerificationQueue({
+  bookings,
+  onAction,
+}: {
+  bookings: Booking[];
+  onAction: (id: string, action: PaymentAction, details?: PaymentDetails | RefundDetails) => void;
+}) {
+  const queue = bookings
+    .filter((booking) => booking.status === "pending" && booking.paymentStatus === "authorized")
+    .sort((a, b) => (a.paymentDeadline || "").localeCompare(b.paymentDeadline || ""));
+  const [verifyingBooking, setVerifyingBooking] = useState<Booking | null>(null);
+
+  return (
+    <Panel title="Payment references to verify" eyebrow="Online payments">
+      <p className="-mt-3 mb-4 text-sm text-slate-600">
+        Guests paid online and entered these reference numbers. Find each one in the GCash or bank account, check the
+        amount, then <strong>Verify</strong>. If it is not there, <strong>Reject reference</strong> puts the booking back to
+        unpaid and its payment deadline applies again.
+      </p>
+      <div className="grid gap-3">
+        {queue.map((booking) => (
+          <article key={booking.id} className="grid gap-3 rounded-lg border-2 border-cyan-200 p-4 md:grid-cols-[1fr_auto] md:items-center">
+            <div>
+              <BookingIdentity booking={booking} />
+              <p className="mt-2 font-mono text-xl font-black tracking-wider text-cyan-900">{booking.paymentReference}</p>
+              <p className="text-sm font-semibold text-slate-950">Amount due {formatPeso(getRemainingBalance(booking))}</p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => setVerifyingBooking(booking)}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+              >
+                <BadgeCheck aria-hidden="true" className="h-4 w-4 shrink-0" />
+                Verify
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Reject reference ${booking.paymentReference}? The booking goes back to unpaid and is cancelled if its payment deadline has passed.`)) {
+                    onAction(booking.id, "reject_reference");
+                  }
+                }}
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+              >
+                <Ban aria-hidden="true" className="h-4 w-4 shrink-0" />
+                Reject reference
+              </button>
+            </div>
+          </article>
+        ))}
+        {queue.length === 0 ? <EmptyState text="No payment references waiting for verification." /> : null}
+      </div>
+      {verifyingBooking ? (
+        <PaymentVerificationDialog
+          booking={verifyingBooking}
+          onClose={() => setVerifyingBooking(null)}
+          onSubmit={(details) => {
+            onAction(verifyingBooking.id, "verify", details);
+            setVerifyingBooking(null);
+          }}
+        />
+      ) : null}
+    </Panel>
+  );
+}
+
 function StatusPill({ status }: { status: BookingStatus | PaymentStatus }) {
-  const label = status.replace("_", " ");
+  const label = status === "pending" || status === "confirmed" || status === "cancelled" || status === "checked_in" ? bookingStatusLabel(status) : paymentStatusLabel(status);
   const tone =
-    status === "confirmed" || status === "paid"
+    status === "confirmed" || status === "paid" || status === "checked_in"
       ? "bg-emerald-50 text-emerald-800"
       : status === "pending" || status === "deposit_paid" || status === "authorized"
         ? "bg-amber-50 text-amber-800"

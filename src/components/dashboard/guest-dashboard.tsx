@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { X, XCircle } from "lucide-react";
 import { canGuestCancel } from "@/lib/booking-logic";
 import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
 import { getBookingChargeSettings } from "@/lib/resort-data";
-import { hasSupabaseEnv } from "@/lib/supabase-browser";
+import { hasPersistentBackend } from "@/lib/backend-mode";
 import type { Booking } from "@/lib/types";
 
 function normalizeBooking(row: Booking | Record<string, unknown>): Booking {
@@ -14,6 +15,7 @@ function normalizeBooking(row: Booking | Record<string, unknown>): Booking {
 
   return {
     id: String(source.id || source.booking_number || ""),
+    bookingNumber: String(source.bookingNumber || source.booking_number || "") || undefined,
     roomId: String(source.roomId || source.room_id || ""),
     roomName: String(source.roomName || room?.name || "Cottage"),
     guestName: String(source.guestName || source.guest_name || ""),
@@ -42,10 +44,10 @@ export function GuestDashboard() {
   const [openBookingId, setOpenBookingId] = useState("");
 
   useEffect(() => {
-    const supabaseConfigured = hasSupabaseEnv();
+    const backendConfigured = hasPersistentBackend();
 
     const syncBookings = () => {
-      if (!supabaseConfigured) {
+      if (!backendConfigured) {
         setBookings(getDemoBookings().map(normalizeBooking));
         return;
       }
@@ -81,7 +83,7 @@ export function GuestDashboard() {
 
     setMessage(result.message);
     if (response.ok) {
-      if (!hasSupabaseEnv()) updateDemoBooking(booking.id, { status: "cancelled" });
+      if (!hasPersistentBackend()) updateDemoBooking(booking.id, { status: "cancelled" });
       setBookings((current) =>
         current.map((item) => (item.id === booking.id ? { ...item, status: "cancelled" } : item)),
       );
@@ -126,7 +128,7 @@ export function GuestDashboard() {
             >
               <div className="flex h-full flex-col justify-between gap-4">
                 <div>
-                  <p className="truncate text-xs font-semibold text-cyan-800" title={booking.id}>{booking.id}</p>
+                  <p className="truncate text-xs font-semibold text-cyan-800" title={booking.bookingNumber || booking.id}>{booking.bookingNumber || booking.id}</p>
                   <h2 className="mt-1 text-lg font-semibold text-slate-950">{booking.roomName}</h2>
                   <p className="mt-2 text-sm font-semibold text-slate-700">
                     Guest: {booking.guestName || "Not provided"}
@@ -155,8 +157,9 @@ export function GuestDashboard() {
                       void cancelBooking(booking);
                     }}
                     disabled={!canCancel}
-                    className="rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
                   >
+                    <XCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
                     {booking.status === "cancelled" ? "Cancelled" : canCancel ? "Cancel booking" : "Cancellation closed"}
                   </button>
                 </div>
@@ -174,13 +177,14 @@ export function GuestDashboard() {
                         event.stopPropagation();
                         setOpenBookingId("");
                       }}
-                      className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50"
                     >
+                      <X aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
                       Close
                     </button>
                   </div>
                   <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <DetailItem label="Booking ID" value={booking.id} />
+                    <DetailItem label="Booking ID" value={booking.bookingNumber || booking.id} />
                     <DetailItem label="Guest" value={booking.guestName || "Not provided"} />
                     <DetailItem label="Cellphone" value={booking.guestPhone || "Not provided"} />
                     <DetailItem label="Email" value={booking.guestEmail || "Not provided"} />

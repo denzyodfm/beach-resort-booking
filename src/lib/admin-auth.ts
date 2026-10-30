@@ -1,6 +1,7 @@
 import "server-only";
 
-import { createAdminClient, createClientServer, hasSupabaseEnv } from "@/lib/supabase-server";
+import { hasDatabaseEnv, queryOne, toBoolean } from "@/lib/db";
+import { getSessionUserId } from "@/lib/session";
 
 export type ResortRole = "guest" | "staff" | "admin";
 
@@ -8,37 +9,48 @@ export type AdminCheck =
   | { ok: true; userId: string; role: ResortRole }
   | { ok: false; response: Response };
 
-export function hasConfiguredSupabase() {
-  return hasSupabaseEnv() && Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
-}
+export type SessionUser = {
+  id: string;
+  email: string;
+  fullName: string;
+  phone: string;
+  role: ResortRole;
+};
 
-async function resolveSessionRole(): Promise<{ userId: string; role: ResortRole } | null> {
+/** The signed-in, non-disabled user, read fresh from the database on every call. */
+export async function getSessionUser(): Promise<SessionUser | null> {
+  if (!hasDatabaseEnv()) return null;
+
   try {
-    const supabase = await createClientServer();
-    const { data: authData, error: authError } = await supabase.auth.getUser();
-    if (authError || !authData.user) return null;
+    const userId = await getSessionUserId();
+    if (!userId) return null;
 
-    const admin = createAdminClient();
-    const { data: profile, error: profileError } = await admin
-      .from("users")
-      .select("role")
-      .eq("id", authData.user.id)
-      .single();
+    const profile = await queryOne("select id, email, full_name, phone, role, disabled from users where id = ?", [userId]);
+    if (!profile || toBoolean(profile.disabled)) return null;
 
-    if (profileError || !profile) return null;
-
-    return { userId: authData.user.id, role: (profile.role || "guest") as ResortRole };
+    return {
+      id: String(profile.id),
+      email: String(profile.email || ""),
+      fullName: String(profile.full_name || ""),
+      phone: String(profile.phone || ""),
+      role: (profile.role || "guest") as ResortRole,
+    };
   } catch {
     return null;
   }
 }
 
+async function resolveSessionRole(): Promise<{ userId: string; role: ResortRole } | null> {
+  const user = await getSessionUser();
+  return user ? { userId: user.id, role: user.role } : null;
+}
+
 /** Admin only. Used for account management, where staff must not reach. */
 export async function requireAdminUser(): Promise<AdminCheck> {
-  if (!hasConfiguredSupabase()) {
+  if (!hasDatabaseEnv()) {
     return {
       ok: false,
-      response: Response.json({ message: "Connect Supabase to manage users." }, { status: 501 }),
+      response: Response.json({ message: "Connect the MySQL database to manage users." }, { status: 501 }),
     };
   }
 
@@ -66,11 +78,11 @@ export async function requireAdminUser(): Promise<AdminCheck> {
  * categories, reviews, and blocked dates.
  *
  * Demo mode has no accounts and no real guest data, so it stays open exactly as
- * before. The guard only takes effect once Supabase is configured, which is the
- * deployed case.
+ * before. The guard only takes effect once the database is configured, which is
+ * the deployed case.
  */
 export async function requireResortManager(): Promise<AdminCheck> {
-  if (!hasConfiguredSupabase()) {
+  if (!hasDatabaseEnv()) {
     return { ok: true, userId: "demo-manager", role: "admin" };
   }
 
@@ -95,7 +107,7 @@ export async function requireResortManager(): Promise<AdminCheck> {
 
 /** Non-throwing check for endpoints that serve both guests and managers. */
 export async function isResortManager() {
-  if (!hasConfiguredSupabase()) return false;
+  if (!hasDatabaseEnv()) return false;
 
   const session = await resolveSessionRole();
   return session?.role === "admin" || session?.role === "staff";

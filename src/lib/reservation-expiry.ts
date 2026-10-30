@@ -1,37 +1,51 @@
 import "server-only";
 
-import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
+import { execute, hasDatabaseEnv, parseJsonArray, query } from "@/lib/db";
 import { getReservationHoldHours } from "@/lib/resort-data";
 
+/** Deadline for a booking that predates the payment_deadline column: created_at + the cottage's hold. */
+export function computePaymentDeadline(createdAt: unknown, bookingIncludes: unknown) {
+  const holdHours = getReservationHoldHours(parseJsonArray(bookingIncludes));
+  return new Date(new Date(String(createdAt)).getTime() + holdHours * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * Cancels pending bookings that are still unpaid after their payment deadline.
+ * Bookings where the guest has submitted a payment reference ('authorized') are
+ * left alone until staff verify or reject the reference.
+ */
 export async function expireUnpaidReservations() {
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) return 0;
+  if (!hasDatabaseEnv()) return 0;
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("bookings")
-    .select("id, created_at, rooms(booking_includes)")
-    .eq("status", "pending")
-    .eq("payment_status", "unpaid");
+  try {
+    const data = await query(
+      `select b.id, b.created_at, b.payment_deadline, r.booking_includes
+         from bookings b
+         left join rooms r on r.id = b.room_id
+        where b.status = 'pending' and b.payment_status = 'unpaid'`,
+    );
 
-  if (error || !data?.length) return 0;
+    if (!data.length) return 0;
 
-  const now = Date.now();
-  const expiredIds = data.flatMap((booking) => {
-    const relation = booking.rooms as unknown as { booking_includes?: unknown } | Array<{ booking_includes?: unknown }> | null;
-    const room = Array.isArray(relation) ? relation[0] : relation;
-    const holdHours = getReservationHoldHours(room?.booking_includes);
-    const expiresAt = new Date(booking.created_at).getTime() + holdHours * 60 * 60 * 1000;
-    return Number.isFinite(expiresAt) && expiresAt <= now ? [booking.id] : [];
-  });
+    const now = Date.now();
+    const expiredIds = data.flatMap((booking) => {
+      const deadline = booking.payment_deadline
+        ? String(booking.payment_deadline)
+        : computePaymentDeadline(booking.created_at, booking.booking_includes);
+      const expiresAt = new Date(deadline).getTime();
+      return Number.isFinite(expiresAt) && expiresAt <= now ? [booking.id] : [];
+    });
 
-  if (!expiredIds.length) return 0;
+    if (!expiredIds.length) return 0;
 
-  const { error: updateError } = await supabase
-    .from("bookings")
-    .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
-    .in("id", expiredIds)
-    .eq("status", "pending")
-    .eq("payment_status", "unpaid");
+    const result = await execute(
+      `update bookings set status = 'cancelled', cancelled_at = utc_timestamp(3)
+        where id in (?) and status = 'pending' and payment_status = 'unpaid'`,
+      [expiredIds],
+    );
 
-  return updateError ? 0 : expiredIds.length;
+    return result.affectedRows;
+  } catch {
+    return 0;
+  }
 }

@@ -1,73 +1,82 @@
 import { requireResortManager } from "@/lib/admin-auth";
-import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
+import { errorMessage, execute, hasDatabaseEnv, queryOne, toInsertClause, toSetClause } from "@/lib/db";
 import { defaultCategories, normalizeCategory } from "@/lib/resort-data";
+import { fetchCategoryRows } from "@/lib/rooms-server";
 
 export async function GET() {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     return Response.json(defaultCategories);
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase.from("room_categories").select("*").order("sort_order");
-
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-  return Response.json((data || []).map(normalizeCategory));
+  try {
+    return Response.json((await fetchCategoryRows()).map(normalizeCategory));
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return Response.json({ message: "Connect Supabase to create categories." }, { status: 501 });
+  if (!hasDatabaseEnv()) {
+    return Response.json({ message: "Connect the MySQL database to create categories." }, { status: 501 });
   }
 
-  const body = await request.json();
-  const row = toCategoryRow(body);
-  const supabase = createAdminClient();
-  const { data, error } = await supabase.from("room_categories").insert(row).select().single();
+  const row = toCategoryRow(await request.json());
 
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-  return Response.json(normalizeCategory(data), { status: 201 });
+  try {
+    const insert = toInsertClause(row);
+    await execute(`insert into room_categories (${insert.columns}) values (${insert.placeholders})`, insert.params);
+    const data = await queryOne("select * from room_categories where id = ?", [row.id]);
+    return Response.json(normalizeCategory(data || row), { status: 201 });
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function PATCH(request: Request) {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return Response.json({ message: "Connect Supabase to update categories." }, { status: 501 });
+  if (!hasDatabaseEnv()) {
+    return Response.json({ message: "Connect the MySQL database to update categories." }, { status: 501 });
   }
 
-  const body = await request.json();
-  const { id, ...updates } = toCategoryRow(body);
-  const supabase = createAdminClient();
-  const { data, error } = await supabase.from("room_categories").update(updates).eq("id", id).select().single();
+  const { id, ...updates } = toCategoryRow(await request.json());
 
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-  return Response.json(normalizeCategory(data));
+  try {
+    const set = toSetClause(updates);
+    await execute(`update room_categories set ${set.sql} where id = ?`, [...set.params, id]);
+    const data = await queryOne("select * from room_categories where id = ?", [id]);
+    if (!data) return Response.json({ message: "Category not found." }, { status: 404 });
+    return Response.json(normalizeCategory(data));
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: Request) {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return Response.json({ message: "Connect Supabase to delete categories." }, { status: 501 });
+  if (!hasDatabaseEnv()) {
+    return Response.json({ message: "Connect the MySQL database to delete categories." }, { status: 501 });
   }
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   if (!id) return Response.json({ message: "Missing category id." }, { status: 400 });
 
-  const supabase = createAdminClient();
-  const { error } = await supabase.from("room_categories").delete().eq("id", id);
-
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-  return Response.json({ id });
+  try {
+    await execute("delete from room_categories where id = ?", [id]);
+    return Response.json({ id });
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 function slugify(value: string) {

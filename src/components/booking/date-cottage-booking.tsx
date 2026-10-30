@@ -1,13 +1,35 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CalendarCheck, CalendarPlus, Loader2, Wallet, X } from "lucide-react";
 import { findBlockedBookingDate, type BookingBlockedDate } from "@/lib/booking-blocked-dates";
 import { findBookingConflict, dateRangesOverlap } from "@/lib/booking-logic";
+import { readBookingExtras } from "@/lib/booking-row";
+import {
+  formatDeadline,
+  formatPeso,
+  getBookingChannel,
+  getBookingCharges,
+  getPremiumFee,
+  paymentStatusLabel,
+  partySize,
+  type BookingSettings,
+  type BookingType,
+  type GuestParty,
+} from "@/lib/booking-settings";
 import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
 import { getDemoBookings, saveDemoBooking } from "@/lib/demo-bookings";
-import { nightsBetween } from "@/lib/resort-data";
-import { hasSupabaseEnv } from "@/lib/supabase-browser";
+import { hasPersistentBackend } from "@/lib/backend-mode";
 import type { Booking, BookingStatus, CottageCategory, PaymentLog, PaymentStatus, Room } from "@/lib/types";
+import {
+  BookingTypeChooser,
+  ChargeBreakdown,
+  guestViewFromNewBooking,
+  InternetAccessOption,
+  PartyFields,
+  PayBeforeNotice,
+} from "./booking-options";
+import { BookingPaymentPanel, PaymentDeadlineBanner, type GuestBookingView } from "./payment-panel";
 
 type BookingRow = Booking | Record<string, unknown>;
 type FormState = {
@@ -17,7 +39,7 @@ type FormState = {
   guests: number;
 };
 
-const activeStatuses: BookingStatus[] = ["pending", "confirmed"];
+const activeStatuses: BookingStatus[] = ["pending", "confirmed", "checked_in"];
 
 function normalizeBooking(row: BookingRow): Booking {
   const source = row as Record<string, unknown>;
@@ -46,23 +68,22 @@ function normalizeBooking(row: BookingRow): Booking {
     paymentAmountPaid: Number(paymentDetails.paymentAmountPaid || source.paymentAmountPaid || 0),
     paymentHistory: Array.isArray(paymentDetails.paymentHistory) ? paymentDetails.paymentHistory as PaymentLog[] : [],
     createdAt: String(source.createdAt || source.created_at || new Date().toISOString()).slice(0, 10),
+    ...readBookingExtras(source),
   };
-}
-
-function formatPeso(value: number) {
-  return `Php${value.toLocaleString()}`;
 }
 
 export function DateCottageBooking({
   rooms,
   categories,
   resortToday,
+  settings,
   todayOnly = false,
   compact = false,
 }: {
   rooms: Room[];
   categories: CottageCategory[];
   resortToday: string;
+  settings: BookingSettings;
   todayOnly?: boolean;
   compact?: boolean;
 }) {
@@ -70,7 +91,7 @@ export function DateCottageBooking({
   const todayMonth = today.slice(0, 7);
   const { user } = useDemoAuth();
   const isManager = canManageResort(user?.role);
-  const supabaseConfigured = hasSupabaseEnv();
+  const backendConfigured = hasPersistentBackend();
   const categoryOptions = useMemo(
     () => categories.filter((category) => rooms.some((room) => room.categoryId === category.id)),
     [categories, rooms],
@@ -82,6 +103,13 @@ export function DateCottageBooking({
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [blockedDates, setBlockedDates] = useState<BookingBlockedDate[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState("");
+  // Walk-in (today-only) bookings always name the cottage; online bookings start as Standard.
+  const [bookingType, setBookingType] = useState<BookingType>(todayOnly ? "premium" : "standard");
+  const [standardDaySelected, setStandardDaySelected] = useState(false);
+  const [internetAccess, setInternetAccess] = useState(false);
+  // Entrance fee mix; form.guests always equals its total.
+  const [party, setParty] = useState<GuestParty>({ regular: 2, child: 0, senior: 0 });
+  const [confirmation, setConfirmation] = useState<GuestBookingView | null>(null);
   const [form, setForm] = useState<FormState>({
     guestName: user?.name || "",
     guestPhone: user?.phone || "",
@@ -93,15 +121,17 @@ export function DateCottageBooking({
   const [selectedExistingBooking, setSelectedExistingBooking] = useState<Booking | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
   const [paidBy, setPaidBy] = useState("");
   const bookingDialogRef = useRef<HTMLDialogElement>(null);
+  const standardMode = !todayOnly && bookingType === "standard";
 
   useEffect(() => {
     let active = true;
 
     function mergeBookings(apiRows: BookingRow[]) {
       const apiBookings = apiRows.map(normalizeBooking);
-      if (supabaseConfigured) return apiBookings;
+      if (backendConfigured) return apiBookings;
 
       const localBookings = getDemoBookings().map(normalizeBooking);
       const apiIds = new Set(apiBookings.map((booking) => booking.id));
@@ -109,7 +139,7 @@ export function DateCottageBooking({
     }
 
     const syncBookings = () => {
-      if (!supabaseConfigured) {
+      if (!backendConfigured) {
         setBookings(getDemoBookings().map(normalizeBooking));
       }
 
@@ -130,7 +160,7 @@ export function DateCottageBooking({
       active = false;
       window.removeEventListener("bolihon-bookings-updated", syncBookings);
     };
-  }, [isManager, supabaseConfigured]);
+  }, [isManager, backendConfigured]);
 
   useEffect(() => {
     let active = true;
@@ -151,10 +181,6 @@ export function DateCottageBooking({
 
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId);
   const effectiveDay = selectedDay || bookingDate;
-  const cottageFee = selectedRoom ? selectedRoom.pricePerNight * nightsBetween(effectiveDay, effectiveDay) : 0;
-  const premiumFee = selectedRoom?.premiumFeeEnabled ? selectedRoom.premiumFeeAmount || 0 : 0;
-  const reservationFee = selectedRoom?.reservationFeeEnabled ? selectedRoom.reservationFeeAmount || 0 : 0;
-  const total = cottageFee + premiumFee + reservationFee;
   const blockedDate = findBlockedBookingDate(effectiveDay, effectiveDay, blockedDates);
   const selectedCategory = categoryOptions.find((category) => category.id === selectedCategoryId) || categoryOptions[0];
   const visibleRooms = useMemo(
@@ -178,6 +204,23 @@ export function DateCottageBooking({
   function getDateBooking(roomId: string, day = effectiveDay) {
     return findBookingConflict(activeBookings, roomId, day, day);
   }
+
+  /** Online cottages in the category still free on a day, cheapest first. */
+  function getFreeRooms(day: string) {
+    return visibleRooms
+      .filter((room) => room.available !== false && !getDateBooking(room.id, day))
+      .sort((a, b) => a.pricePerNight - b.pricePerNight);
+  }
+
+  // Standard bookings are quoted on the cheapest free cottage; the server only
+  // assigns cottages with that same total.
+  const freeRoomsForDay = standardMode && standardDaySelected ? getFreeRooms(effectiveDay) : [];
+  const quoteRoom = standardMode ? (standardDaySelected ? freeRoomsForDay[0] : undefined) : selectedRoom;
+  const quoteType: BookingType = quoteRoom && getBookingChannel(quoteRoom) === "walk_in" ? "premium" : bookingType;
+  const charges = quoteRoom
+    ? getBookingCharges({ room: quoteRoom, days: 1, settings, bookingType: quoteType, internetAccess, party })
+    : null;
+  const quoteIsOnline = quoteRoom ? getBookingChannel(quoteRoom) === "online" : false;
 
   function monthRangeFromMonthString(monthStr: string) {
     const [y, m] = monthStr.split("-");
@@ -212,38 +255,29 @@ export function DateCottageBooking({
     [monthDays, todayOnly],
   );
 
+  function resetSelection() {
+    setSelectedRoomId("");
+    setStandardDaySelected(false);
+    setConfirmation(null);
+  }
+
   function selectCategory(categoryId: string) {
     setSelectedCategoryId(categoryId);
     setMessage("");
+    setStandardDaySelected(false);
     setSelectedRoomId((currentRoomId) => {
       const currentRoom = rooms.find((room) => room.id === currentRoomId);
       return currentRoom?.categoryId === categoryId ? currentRoomId : "";
     });
   }
 
-  function selectCell(room: Room, day: string) {
-    if (day < today) {
-      setMessage("Past dates are not available for booking.");
-      return;
-    }
-
-    const blocked = findBlockedBookingDate(day, day, blockedDates);
-    if (blocked.blocked) {
-      setMessage(blocked.reason);
-      return;
-    }
-
-    const conflict = getDateBooking(room.id, day);
-    if (conflict && isManager) {
-      openBookedCottage(room, day, conflict);
-      return;
-    }
-    if (room.available === false || conflict) return;
-
-    setSelectedExistingBooking(null);
-    setSelectedDay(day);
-    setSelectedRoomId(room.id);
+  function changeBookingType(type: BookingType) {
+    setBookingType(type);
     setMessage("");
+    resetSelection();
+  }
+
+  function openBookingDialog() {
     window.requestAnimationFrame(() => {
       if (window.matchMedia("(min-width: 768px)").matches) {
         bookingDialogRef.current?.showModal();
@@ -254,13 +288,62 @@ export function DateCottageBooking({
     });
   }
 
+  function isBookableDay(day: string) {
+    if (day < today) {
+      setMessage("Past dates are not available for booking.");
+      return false;
+    }
+
+    const blocked = findBlockedBookingDate(day, day, blockedDates);
+    if (blocked.blocked) {
+      setMessage(blocked.reason);
+      return false;
+    }
+    return true;
+  }
+
+  function selectCell(room: Room, day: string) {
+    if (!isBookableDay(day)) return;
+
+    const conflict = getDateBooking(room.id, day);
+    if (conflict && isManager) {
+      openBookedCottage(room, day, conflict);
+      return;
+    }
+    if (room.available === false || conflict) return;
+
+    setSelectedExistingBooking(null);
+    setConfirmation(null);
+    setStandardDaySelected(false);
+    setSelectedDay(day);
+    setSelectedRoomId(room.id);
+    setMessage("");
+    openBookingDialog();
+  }
+
+  function selectStandardDay(day: string) {
+    if (!isBookableDay(day)) return;
+    if (!getFreeRooms(day).length) return;
+
+    setSelectedExistingBooking(null);
+    setConfirmation(null);
+    setSelectedRoomId("");
+    setSelectedDay(day);
+    setStandardDaySelected(true);
+    setMessage("");
+    openBookingDialog();
+  }
+
   function openBookedCottage(room: Room, day: string, booking: Booking) {
     const balance = Math.max(0, booking.totalPrice - (booking.paymentAmountPaid || 0));
     setSelectedRoomId(room.id);
+    setStandardDaySelected(false);
+    setConfirmation(null);
     setSelectedDay(day);
     setSelectedExistingBooking(booking);
     setPaymentAmount(String(balance));
     setPaymentNote(booking.paymentNote || "");
+    setPaymentReference(booking.paymentReference || "");
     setPaidBy(booking.guestName || "");
     setMessage("");
     window.requestAnimationFrame(() => bookingDialogRef.current?.showModal());
@@ -268,16 +351,15 @@ export function DateCottageBooking({
 
   async function submitBooking(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedRoom) return;
+    if (!quoteRoom || !charges) return;
 
     if (blockedDate.blocked) {
       setMessage(blockedDate.reason);
       return;
     }
 
-    const conflict = getDateBooking(selectedRoom.id);
-    if (conflict) {
-      setMessage(`${selectedRoom.name} is already booked on ${effectiveDay}.`);
+    if (!standardMode && getDateBooking(quoteRoom.id)) {
+      setMessage(`${quoteRoom.name} is already booked on ${effectiveDay}.`);
       return;
     }
 
@@ -290,14 +372,17 @@ export function DateCottageBooking({
     setMessage("");
 
     const payload = {
-      roomId: selectedRoom.id,
+      ...(standardMode ? { categoryId: selectedCategory?.id } : { roomId: quoteRoom.id }),
+      bookingType: quoteType,
+      internetAccess,
       guestName: form.guestName,
       guestEmail: form.guestEmail,
       guestPhone: form.guestPhone,
       checkIn: effectiveDay,
       checkOut: effectiveDay,
       guests: form.guests,
-      totalPrice: total,
+      party,
+      totalPrice: charges.total,
     };
 
     try {
@@ -306,38 +391,49 @@ export function DateCottageBooking({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const result = (await response.json()) as {
-        booking?: Booking | Record<string, unknown>;
-        message?: string;
-      };
+      const result = (await response.json()) as Parameters<typeof guestViewFromNewBooking>[0] & { message?: string };
 
-      if (!response.ok && supabaseConfigured) {
+      if (!response.ok && backendConfigured) {
         throw new Error(result.message || "Unable to save booking.");
       }
 
-      if (!supabaseConfigured) {
+      if (!backendConfigured) {
         const source = (result.booking || {}) as Record<string, unknown>;
         saveDemoBooking({
           id: String(source.id || source.booking_number || `DEMO-${window.crypto.randomUUID()}`),
-          roomId: selectedRoom.id,
-          roomName: selectedRoom.name,
+          roomId: quoteRoom.id,
+          roomName: quoteRoom.name,
           guestName: form.guestName,
           guestEmail: form.guestEmail,
           guestPhone: form.guestPhone,
           checkIn: effectiveDay,
           checkOut: effectiveDay,
           guests: form.guests,
-          totalPrice: total,
+          totalPrice: charges.total,
           status: "pending",
           paymentStatus: "unpaid",
           createdAt: new Date().toISOString().slice(0, 10),
         });
       }
 
-      setMessage(result.message || `${selectedRoom.name} is held as a pending booking for ${effectiveDay}.`);
-      setSelectedRoomId("");
-      bookingDialogRef.current?.close();
       window.dispatchEvent(new Event("bolihon-bookings-updated"));
+
+      if (response.ok && result.channel === "online") {
+        // Keep the window open on the payment step: deadline, where to pay and the reference box.
+        setConfirmation(
+          guestViewFromNewBooking(result, {
+            checkIn: effectiveDay,
+            checkOut: effectiveDay,
+            guests: form.guests,
+            guestName: form.guestName,
+          }),
+        );
+        return;
+      }
+
+      setMessage(result.message || `${quoteRoom.name} is held as a pending booking for ${effectiveDay}.`);
+      resetSelection();
+      bookingDialogRef.current?.close();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to save booking.");
     } finally {
@@ -355,12 +451,16 @@ export function DateCottageBooking({
       setMessage("Enter a payment amount greater than zero.");
       return;
     }
+    if (selectedExistingBooking.channel === "online" && !paymentReference.trim()) {
+      setMessage("Online bookings are paid online. Enter the payment reference number you matched against the GCash or bank record.");
+      return;
+    }
 
     const paymentLog: PaymentLog = {
       id: `PAY-${window.crypto.randomUUID()}`,
       type: "payment",
       amount,
-      note: paymentNote.trim(),
+      note: [paymentReference.trim() ? `Ref ${paymentReference.trim()}` : "", paymentNote.trim()].filter(Boolean).join(" · "),
       paidBy: paidBy.trim() || selectedExistingBooking.guestName,
       actorName: user?.name || user?.email || "Staff",
       actorRole: user?.role || "staff",
@@ -380,6 +480,7 @@ export function DateCottageBooking({
           paymentNote: paymentNote.trim(),
           paymentAmountPaid: nextPaid,
           paymentHistory: [...(selectedExistingBooking.paymentHistory || []), paymentLog],
+          ...(paymentReference.trim() ? { paymentReference: paymentReference.trim() } : {}),
         }),
       });
       const result = await response.json();
@@ -396,19 +497,27 @@ export function DateCottageBooking({
   }
 
   function renderBookingForm(prefix: string) {
-    if (!selectedRoom) return null;
+    if (!quoteRoom || !charges) return null;
 
     return (
       <form onSubmit={submitBooking} className="grid gap-4">
-        <p className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
-          This cottage will be held for {selectedRoom.reservationHoldHours || 24} hours after booking. If payment is not recorded before the hold expires, the reservation is cancelled automatically and the cottage becomes available again.
-        </p>
-        <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
-          <div className="flex justify-between gap-4"><span>Cottage fee</span><strong>{formatPeso(cottageFee)}</strong></div>
-          {premiumFee > 0 ? <div className="mt-2 flex justify-between gap-4"><span>Premium charge</span><strong>{formatPeso(premiumFee)}</strong></div> : null}
-          {reservationFee > 0 ? <div className="mt-2 flex justify-between gap-4"><span>Reservation/service fee</span><strong>{formatPeso(reservationFee)}</strong></div> : null}
-          <div className="mt-3 flex justify-between gap-4 border-t border-slate-300 pt-3 text-base"><strong>Total</strong><strong>{formatPeso(total)}</strong></div>
-        </div>
+        {quoteIsOnline ? (
+          <PayBeforeNotice holdHours={quoteRoom.reservationHoldHours || 24} />
+        ) : (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+            Walk-in booking. If payment is not recorded within {quoteRoom.reservationHoldHours || 24} hours, it is cancelled
+            automatically.
+          </p>
+        )}
+        {standardMode ? (
+          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+            <strong>Standard booking:</strong> the resort assigns one of the {freeRoomsForDay.length} available
+            cottage{freeRoomsForDay.length === 1 ? "" : "s"} in {selectedCategory?.name} on {effectiveDay}. You will see
+            the cottage number right after booking. Want a specific cottage? Switch to <strong>Premium booking</strong>.
+          </p>
+        ) : null}
+        <ChargeBreakdown charges={charges} days={1} />
+        <InternetAccessOption id={`${prefix}-internet`} settings={settings} checked={internetAccess} onChange={setInternetAccess} />
         <Field
           id={`${prefix}-guest-name`}
           label="Guest name"
@@ -430,34 +539,56 @@ export function DateCottageBooking({
           value={form.guestEmail}
           onChange={(guestEmail) => setForm((current) => ({ ...current, guestEmail }))}
         />
-        <div>
-          <label htmlFor={`${prefix}-guests`} className="text-sm font-semibold text-slate-700">
-            Guests
-          </label>
-          <input
-            id={`${prefix}-guests`}
-            type="number"
-            min={1}
-            max={selectedRoom.maxGuests}
-            value={form.guests}
-            onChange={(event) => setForm((current) => ({ ...current, guests: Number(event.target.value) }))}
-            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
-          />
-        </div>
+        <PartyFields
+          id={`${prefix}-guests`}
+          settings={settings}
+          party={party}
+          maxGuests={quoteRoom.maxGuests}
+          onChange={(next) => {
+            setParty(next);
+            setForm((current) => ({ ...current, guests: partySize(next) }));
+          }}
+        />
         <button
           type="submit"
-          disabled={submitting || blockedDate.blocked || form.guests < 1 || form.guests > selectedRoom.maxGuests || !form.guestPhone.trim()}
-          className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+          disabled={submitting || blockedDate.blocked || form.guests < 1 || form.guests > quoteRoom.maxGuests || !form.guestPhone.trim()}
+          className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          {submitting ? "Holding..." : "Hold this cottage"}
+          {submitting ? <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin" /> : quoteIsOnline ? <CalendarCheck aria-hidden="true" className="h-4 w-4 shrink-0" /> : <CalendarPlus aria-hidden="true" className="h-4 w-4 shrink-0" />}
+          {submitting ? "Booking..." : quoteIsOnline ? `Book now · ${formatPeso(charges.total)}` : "Hold this cottage"}
         </button>
       </form>
     );
   }
 
+  const dialogTitle = confirmation
+    ? confirmation.roomName
+    : selectedRoom?.name || (standardMode && selectedCategory ? `Any available cottage · ${selectedCategory.name}` : "");
+  const dialogEyebrow = confirmation
+    ? "Booked — pay to keep it"
+    : selectedExistingBooking
+      ? "Cottage payment"
+      : standardMode
+        ? "Standard booking"
+        : quoteIsOnline
+          ? "Premium booking"
+          : "Booking details";
+
   return (
     <div className={`grid lg:grid-cols-1 ${compact ? "gap-2" : "gap-3"}`}>
       <div className={compact ? "grid gap-2" : "grid gap-3"}>
+        {!todayOnly ? (
+          <div className={`rounded-lg border border-slate-200 bg-white shadow-sm ${compact ? "px-3 py-2" : "px-4 py-3"}`}>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">How do you want to book?</p>
+            <BookingTypeChooser
+              value={bookingType}
+              onChange={changeBookingType}
+              premiumFee={visibleRooms[0] ? getPremiumFee(visibleRooms[0], settings) : settings.premiumFeeAmount}
+              compact={compact}
+            />
+          </div>
+        ) : null}
+
         {!todayOnly ? <div className={`rounded-lg border border-slate-200 bg-white shadow-sm ${compact ? "px-3 py-2" : "px-4 py-3"}`}>
           <label htmlFor="booking-month" className={`${compact ? "text-xs" : "text-sm"} font-semibold text-slate-700`}>
             Booking month
@@ -472,7 +603,7 @@ export function DateCottageBooking({
                 const newMonth = event.target.value;
                 setMonth(newMonth);
                 setSelectedDay(newMonth === todayMonth ? today : `${newMonth}-01`);
-                setSelectedRoomId("");
+                resetSelection();
                 setMessage("");
               }}
               className={`${compact ? "min-h-8 text-sm" : "min-h-10"} rounded-md border border-slate-300 px-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2`}
@@ -562,20 +693,20 @@ export function DateCottageBooking({
                         <span className={`mt-1 block text-sm font-semibold ${disabled ? "text-current" : "text-white/85"}`}>{formatPeso(room.pricePerNight)}</span>
                       </span>
                       <span className="mt-5 block text-sm font-bold">
-                        {dateBooking ? <><span className="block">Booked today</span><span className="mt-1 block font-semibold">Guest: {dateBooking.guestName || "Not provided"}</span>{isManager ? <span className="mt-1 block text-xs">Click to record payment</span> : null}</> : disabled ? "Unavailable" : "Available — Book walk-in"}
+                        {dateBooking ? <><span className="block">Booked today</span><span className="mt-1 block font-semibold">Guest: {dateBooking.guestName || "Not provided"}</span>{isManager ? <span className="mt-1 block text-xs">Click to record payment</span> : null}</> : disabled ? "Unavailable" : <span className="inline-flex items-center gap-2"><CalendarPlus aria-hidden="true" className="h-4 w-4 shrink-0" />Available — Book walk-in</span>}
                       </span>
                     </button>
                   );
                 })}
               </div>
             ) : (
-            <div className="max-h-[70vh] min-h-96 overflow-auto overscroll-contain rounded border bg-white [scrollbar-gutter:stable]">
-              <div className={`${todayOnly ? "min-w-[520px]" : "min-w-[1050px]"} w-full`}>
+            <div className="max-h-[70vh] min-h-48 overflow-auto overscroll-contain rounded border bg-white [scrollbar-gutter:stable]">
+              <div className="w-full min-w-[1050px]">
                 {/* Header: days */}
                 <div className="sticky top-0 z-20 border-b border-slate-300 bg-white px-2 py-3 shadow-sm">
                   <div className="grid items-center gap-1" style={calendarGridStyle}>
                     <div className="sticky left-0 z-30 grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-r border-slate-200 bg-white px-3 py-0.5 text-xs font-semibold shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">
-                      <span>Cottage</span>
+                      <span>{standardMode ? "Category" : "Cottage"}</span>
                       <span>Rate</span>
                     </div>
                     {monthDays.map((day) => (
@@ -597,13 +728,50 @@ export function DateCottageBooking({
                   </div>
                 </div>
 
-                {/* Rows: cottages */}
+                {standardMode ? (
+                  <div className="grid items-center gap-2 border-t px-3 py-3" style={calendarGridStyle}>
+                    <div className="sticky left-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 self-stretch border-r border-slate-200 bg-white px-3 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">
+                      <div className="text-sm font-semibold leading-snug text-slate-900">
+                        Any available cottage
+                        <span className="block text-xs font-medium text-slate-500">Number = cottages free</span>
+                      </div>
+                      <div className="whitespace-nowrap text-xs font-medium text-slate-500">
+                        {visibleRooms.length ? `from ${formatPeso(Math.min(...visibleRooms.map((room) => room.pricePerNight)))}` : ""}
+                      </div>
+                    </div>
+                    {monthDays.map((day) => {
+                      const blocked = findBlockedBookingDate(day, day, blockedDates);
+                      const freeCount = day < today || blocked.blocked ? 0 : getFreeRooms(day).length;
+                      const disabled = freeCount === 0;
+                      const selected = standardDaySelected && day === effectiveDay;
+
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => selectStandardDay(day)}
+                          className={`flex h-9 w-full min-w-6 items-center justify-center rounded-sm border text-xs font-black transition ${
+                            disabled
+                              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                              : selected
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600"
+                          }`}
+                          title={disabled ? `${day} — not available` : `${day} — ${freeCount} cottage${freeCount === 1 ? "" : "s"} free`}
+                        >
+                          {day < today || blocked.blocked ? "" : freeCount}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
                 <div>
                   {visibleRooms.map((room) => (
-                    <div key={room.id} className={`grid items-center gap-2 border-t px-3 ${todayOnly ? "py-3" : "py-2"}`} style={calendarGridStyle}>
+                    <div key={room.id} className="grid items-center gap-2 border-t px-3 py-2" style={calendarGridStyle}>
                       <div className="sticky left-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 self-stretch border-r border-slate-200 bg-white px-3 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">
-                        <div className={`${todayOnly ? "text-lg" : "text-sm"} font-semibold leading-snug text-slate-900`}>{room.name}</div>
-                        <div className={`whitespace-nowrap ${todayOnly ? "text-sm" : "text-xs"} font-medium text-slate-500`}>{formatPeso(room.pricePerNight)}</div>
+                        <div className="text-sm font-semibold leading-snug text-slate-900">{room.name}</div>
+                        <div className="whitespace-nowrap text-xs font-medium text-slate-500">{formatPeso(room.pricePerNight)}</div>
                       </div>
                       {monthDays.map((day) => {
                         const blocked = findBlockedBookingDate(day, day, blockedDates);
@@ -623,22 +791,21 @@ export function DateCottageBooking({
                             type="button"
                             disabled={disabled && !(hasBooking && isManager)}
                             onClick={() => dateBooking && isManager ? openBookedCottage(room, day, dateBooking) : selectCell(room, day)}
-                            className={`flex w-full items-center justify-center border font-bold transition ${todayOnly ? "h-14 rounded-lg text-sm" : "h-7 min-w-6 rounded-sm"} ${cellStyle}`}
+                            className={`flex h-7 w-full min-w-6 items-center justify-center rounded-sm border font-bold transition ${cellStyle}`}
                             title={
                               hasBooking
-                                ? `${room.name} — Booked by ${dateBooking?.guestName || "guest"} on ${day}${isManager ? ". Click to record payment." : ""}`
+                                ? `${room.name} — Booked${isManager ? ` by ${dateBooking?.guestName || "guest"}` : ""} on ${day}${isManager ? ". Click to record payment." : ""}`
                                 : isPastDate
                                   ? `${day} — Past date`
                                   : `${room.name} — ${day}`
                             }
-                          >
-                            {todayOnly ? (hasBooking ? "Booked" : disabled ? "Unavailable" : "Available — Book walk-in") : null}
-                          </button>
+                          />
                         );
                       })}
                     </div>
                   ))}
                 </div>
+                )}
               </div>
             </div>
             )}
@@ -647,13 +814,13 @@ export function DateCottageBooking({
               <div className="mb-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center">
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-700">Booking details</p>
-                  {selectedRoom ? (
+                  {quoteRoom ? (
                     <p className="mt-2 text-sm text-slate-600">
-                      Selected <span className="font-semibold text-slate-900">{selectedRoom.name}</span> on <span className="font-semibold text-slate-900">{effectiveDay}</span>.
+                      Selected <span className="font-semibold text-slate-900">{standardMode ? `any available cottage in ${selectedCategory.name}` : quoteRoom.name}</span> on <span className="font-semibold text-slate-900">{effectiveDay}</span>.
                     </p>
                   ) : (
                     <p className="mt-2 text-sm text-slate-600">
-                      Click a green cell to choose an available cottage and date.
+                      Tap a green cell to choose an available {standardMode ? "date" : "cottage and date"}.
                     </p>
                   )}
                 </div>
@@ -678,47 +845,81 @@ export function DateCottageBooking({
                 </div>
               </div>
 
-              {selectedRoom ? renderBookingForm("mobile") : null}
+              {confirmation ? (
+                <BookingPaymentPanel booking={confirmation} guestPhone={form.guestPhone} onUpdated={setConfirmation} />
+              ) : quoteRoom ? renderBookingForm("mobile") : null}
 
               {message ? <p className="mt-4 rounded-md bg-cyan-50 px-4 py-3 text-sm text-cyan-900">{message}</p> : null}
             </div>
 
             <dialog
               ref={bookingDialogRef}
-              className="m-auto w-[min(34rem,calc(100%-2rem))] rounded-xl border border-slate-200 bg-white p-0 shadow-2xl backdrop:bg-slate-950/55"
-              onClose={() => setMessage("")}
+              className="m-auto max-h-[calc(100vh-2rem)] w-[min(36rem,calc(100%-2rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white p-0 shadow-2xl backdrop:bg-slate-950/55"
+              onClose={() => {
+                setMessage("");
+                if (confirmation) resetSelection();
+              }}
             >
-              {selectedRoom ? (
+              {dialogTitle ? (
                 <div className="p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">{selectedExistingBooking ? "Cottage payment" : "Booking details"}</p>
-                      <h2 className="mt-1 text-2xl font-bold text-slate-950">{selectedRoom.name}</h2>
-                      <p className="mt-1 text-sm text-slate-600">{effectiveDay} · {formatPeso(selectedExistingBooking?.totalPrice || total)}</p>
+                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">{dialogEyebrow}</p>
+                      <h2 className="mt-1 text-2xl font-bold text-slate-950">{dialogTitle}</h2>
+                      {!confirmation ? (
+                        <p className="mt-1 text-sm text-slate-600">{effectiveDay} · {formatPeso(selectedExistingBooking?.totalPrice || charges?.total || 0)}</p>
+                      ) : null}
                     </div>
-                    <button type="button" onClick={() => bookingDialogRef.current?.close()} className="rounded-full border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                    <button type="button" onClick={() => bookingDialogRef.current?.close()} className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                      <X aria-hidden="true" className="h-4 w-4 shrink-0" />
                       Close
                     </button>
                   </div>
                   <div className="mt-5">
-                    {selectedExistingBooking ? (
+                    {confirmation ? (
+                      <BookingPaymentPanel booking={confirmation} guestPhone={form.guestPhone} onUpdated={setConfirmation} />
+                    ) : selectedExistingBooking ? (
                       <form onSubmit={recordPayment} className="grid gap-4">
                         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
                           <p className="font-bold">Guest: {selectedExistingBooking.guestName || "Not provided"}</p>
+                          <p className="mt-1">
+                            {selectedExistingBooking.channel === "online" ? "Online booking" : selectedExistingBooking.channel === "walk_in" ? "Walk-in" : "Booking"}
+                            {selectedExistingBooking.bookingType ? ` · ${selectedExistingBooking.bookingType}` : ""} · {paymentStatusLabel(selectedExistingBooking.paymentStatus)}
+                          </p>
                           <p className="mt-1">Total: {formatPeso(selectedExistingBooking.totalPrice)}</p>
                           <p className="mt-1">Paid: {formatPeso(selectedExistingBooking.paymentAmountPaid || 0)}</p>
                           <p className="mt-1 font-bold">Balance: {formatPeso(Math.max(0, selectedExistingBooking.totalPrice - (selectedExistingBooking.paymentAmountPaid || 0)))}</p>
+                          {selectedExistingBooking.paymentReference ? (
+                            <p className="mt-1 font-bold">Guest reference no.: <span className="font-mono">{selectedExistingBooking.paymentReference}</span></p>
+                          ) : null}
                         </div>
+                        {selectedExistingBooking.status === "pending" && selectedExistingBooking.paymentStatus === "unpaid" ? (
+                          <PaymentDeadlineBanner deadline={selectedExistingBooking.paymentDeadline} compact />
+                        ) : null}
+                        <Field
+                          id="monitoring-payment-reference"
+                          label={selectedExistingBooking.channel === "online" ? "Payment reference no. (required for online bookings)" : "Payment reference no. (optional)"}
+                          required={selectedExistingBooking.channel === "online"}
+                          value={paymentReference}
+                          onChange={setPaymentReference}
+                        />
                         <Field id="monitoring-payment-amount" label="Payment amount" type="number" value={paymentAmount} onChange={setPaymentAmount} />
                         <Field id="monitoring-paid-by" label="Paid by" value={paidBy} onChange={setPaidBy} />
                         <Field id="monitoring-payment-note" label="Payment note" required={false} value={paymentNote} onChange={setPaymentNote} />
-                        <button type="submit" disabled={submitting || Number(paymentAmount) <= 0} className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300">
+                        <button type="submit" disabled={submitting || Number(paymentAmount) <= 0} className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300">
+                          {submitting ? <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin" /> : <Wallet aria-hidden="true" className="h-4 w-4 shrink-0" />}
                           {submitting ? "Recording..." : "Record cottage payment"}
                         </button>
                       </form>
                     ) : renderBookingForm("dialog")}
                   </div>
                   {message ? <p className="mt-4 rounded-md bg-cyan-50 px-4 py-3 text-sm text-cyan-900">{message}</p> : null}
+                  {confirmation ? (
+                    <p className="mt-3 text-xs text-slate-500">
+                      Closed this window? Use <strong>Pay / Track Booking</strong> in the top menu with your booking number
+                      {confirmation.paymentDeadline ? ` before ${formatDeadline(confirmation.paymentDeadline)}` : ""}.
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
             </dialog>

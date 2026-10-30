@@ -9,29 +9,34 @@ import {
   upsertServerAutoReplyKnowledge,
 } from "@/lib/auto-reply-knowledge-store";
 import { requireAdminUser } from "@/lib/admin-auth";
-import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
+import {
+  errorMessage,
+  execute,
+  hasDatabaseEnv,
+  isMissingTableError,
+  parseJsonArray,
+  query,
+  queryOne,
+  toInsertClause,
+  toSetClause,
+  type DbRow,
+} from "@/lib/db";
 
 export async function GET() {
-  if (!hasPersistentKnowledgeStore()) {
+  if (!hasDatabaseEnv()) {
     return Response.json({ items: getServerAutoReplyKnowledge(), mode: "demo" });
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("auto_reply_knowledge")
-    .select("*")
-    .order("sort_order", { ascending: true })
-    .order("created_at", { ascending: true });
-
-  if (error) {
+  try {
+    const data = await query("select * from auto_reply_knowledge order by sort_order asc, created_at asc");
+    return Response.json({ items: data.map(fromKnowledgeRow), mode: "database" });
+  } catch (error) {
     return Response.json({
       items: defaultAutoReplyKnowledge,
       mode: "setup_required",
-      message: getSetupMessage(error.message),
+      message: getSetupMessage(error),
     });
   }
-
-  return Response.json({ items: (data || []).map(normalizeKnowledgeItem), mode: "supabase" });
 }
 
 export async function POST(request: Request) {
@@ -45,19 +50,18 @@ export async function POST(request: Request) {
     updatedAt: new Date().toISOString(),
   };
 
-  if (!hasPersistentKnowledgeStore()) {
+  if (!hasDatabaseEnv()) {
     return Response.json(upsertServerAutoReplyKnowledge(item), { status: 201 });
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("auto_reply_knowledge")
-    .insert(toKnowledgeRow(item))
-    .select("*")
-    .single();
-
-  if (error) return Response.json({ message: getSetupMessage(error.message) }, { status: 500 });
-  return Response.json(normalizeKnowledgeItem(data), { status: 201 });
+  try {
+    const insert = toInsertClause(toKnowledgeRow(item));
+    await execute(`insert into auto_reply_knowledge (${insert.columns}) values (${insert.placeholders})`, insert.params);
+    const data = await queryOne("select * from auto_reply_knowledge where id = ?", [item.id]);
+    return Response.json(fromKnowledgeRow(data || {}), { status: 201 });
+  } catch (error) {
+    return Response.json({ message: getSetupMessage(error) }, { status: 500 });
+  }
 }
 
 export async function PATCH(request: Request) {
@@ -71,20 +75,20 @@ export async function PATCH(request: Request) {
 
   if (!item.id) return Response.json({ message: "Missing knowledge id." }, { status: 400 });
 
-  if (!hasPersistentKnowledgeStore()) {
+  if (!hasDatabaseEnv()) {
     return Response.json(upsertServerAutoReplyKnowledge(item));
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("auto_reply_knowledge")
-    .update(toKnowledgeRow(item))
-    .eq("id", item.id)
-    .select("*")
-    .single();
-
-  if (error) return Response.json({ message: getSetupMessage(error.message) }, { status: 500 });
-  return Response.json(normalizeKnowledgeItem(data));
+  try {
+    const { id, ...updates } = toKnowledgeRow(item);
+    const set = toSetClause(updates);
+    await execute(`update auto_reply_knowledge set ${set.sql} where id = ?`, [...set.params, id]);
+    const data = await queryOne("select * from auto_reply_knowledge where id = ?", [id]);
+    if (!data) return Response.json({ message: "Knowledge item not found." }, { status: 404 });
+    return Response.json(fromKnowledgeRow(data));
+  } catch (error) {
+    return Response.json({ message: getSetupMessage(error) }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: Request) {
@@ -95,24 +99,21 @@ export async function DELETE(request: Request) {
   const id = searchParams.get("id");
   if (!id) return Response.json({ message: "Missing knowledge id." }, { status: 400 });
 
-  if (!hasPersistentKnowledgeStore()) {
+  if (!hasDatabaseEnv()) {
     if (!deleteServerAutoReplyKnowledge(id)) return Response.json({ message: "Knowledge item not found." }, { status: 404 });
     return Response.json({ id });
   }
 
-  const supabase = createAdminClient();
-  const { error } = await supabase.from("auto_reply_knowledge").delete().eq("id", id);
-
-  if (error) return Response.json({ message: getSetupMessage(error.message) }, { status: 500 });
-  return Response.json({ id });
-}
-
-function hasPersistentKnowledgeStore() {
-  return hasSupabaseEnv() && Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  try {
+    await execute("delete from auto_reply_knowledge where id = ?", [id]);
+    return Response.json({ id });
+  } catch (error) {
+    return Response.json({ message: getSetupMessage(error) }, { status: 500 });
+  }
 }
 
 async function requireAutoReplyAdmin(request: Request) {
-  if (hasPersistentKnowledgeStore()) return requireAdminUser();
+  if (hasDatabaseEnv()) return requireAdminUser();
 
   if (request.headers.get("x-demo-role") === "admin") {
     return { ok: true as const, userId: "demo-admin" };
@@ -128,6 +129,10 @@ function createKnowledgeId() {
   return `knowledge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function fromKnowledgeRow(row: DbRow) {
+  return normalizeKnowledgeItem({ ...row, keywords: parseJsonArray(row.keywords) });
+}
+
 function toKnowledgeRow(item: AutoReplyKnowledgeItem) {
   return {
     id: item.id,
@@ -139,10 +144,10 @@ function toKnowledgeRow(item: AutoReplyKnowledgeItem) {
   };
 }
 
-function getSetupMessage(message: string) {
-  if (message.includes("auto_reply_knowledge")) {
-    return "Run supabase/auto-reply-knowledge-migration.sql in Supabase to enable persistent auto-reply knowledge.";
+function getSetupMessage(error: unknown) {
+  if (isMissingTableError(error)) {
+    return "Run mysql/schema.sql to create the auto_reply_knowledge table.";
   }
 
-  return message;
+  return errorMessage(error);
 }

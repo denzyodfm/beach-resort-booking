@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { LogIn } from "lucide-react";
 import { GuestDashboard } from "@/components/dashboard/guest-dashboard";
 import { useDemoAuth } from "@/lib/demo-auth";
 
@@ -16,7 +17,8 @@ export function GuestGate() {
       <p className="mt-3 text-slate-600">
         Sign in as a guest to view your pending bookings, contact info, cancellation options, and chat with admin.
       </p>
-      <Link href="/login?role=guest" className="mt-6 inline-flex rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white">
+      <Link href="/login?role=guest" className="mt-6 inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white">
+        <LogIn aria-hidden="true" className="h-4 w-4 shrink-0" />
         Go to guest login
       </Link>
     </div>

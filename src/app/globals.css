@@ -1,12 +1,24 @@
 @import "tailwindcss";
 
+/*
+ * BOLIHON Cove theme, taken from the logo:
+ *   forest green  #45662d  wordmark            -> brand / primary actions
+ *   leaf greens               leaf + hill tiles  -> "emerald" scale (success, available)
+ *   lime sage     #a3b86c  "COVE"               -> soft accent
+ *   lagoon teal   #2b7f91  water tile           -> "cyan" scale (links, info, eyebrows)
+ *   warm sand                                    -> page background
+ * The cyan and emerald scales are redefined so every existing screen picks up
+ * the logo palette without per-component colour changes.
+ */
 :root {
-  --background: #f7fbfb;
-  --foreground: #0f172a;
-  --coral: #f9735b;
-  --coral-dark: #df4f3c;
+  --background: #faf7f0;
+  --foreground: #14231a;
+  --coral: #f08a5d;
+  --coral-dark: #d96b3d;
   --bolihon-green: #45662d;
   --bolihon-green-dark: #314d20;
+  --cove: #a3b86c;
+  --sand: #f3ecdc;
 }
 
 @theme inline {
@@ -16,7 +28,42 @@
   --color-coral-dark: var(--coral-dark);
   --color-bolihon-green: var(--bolihon-green);
   --color-bolihon-green-dark: var(--bolihon-green-dark);
-  --font-sans: Arial, Helvetica, sans-serif;
+  --color-cove: var(--cove);
+  --color-sand: var(--sand);
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-heading), var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+@theme {
+  /* Lagoon teal (logo water tile). */
+  --color-cyan-50: #eef8f9;
+  --color-cyan-100: #d5eff3;
+  --color-cyan-200: #ade0e8;
+  --color-cyan-300: #7bc9d7;
+  --color-cyan-400: #47aabf;
+  --color-cyan-500: #2b8ea4;
+  --color-cyan-600: #23768a;
+  --color-cyan-700: #1f6072;
+  --color-cyan-800: #1d4f5e;
+  --color-cyan-900: #1b4350;
+  --color-cyan-950: #0d2a33;
+
+  /* Leaf greens (logo leaf and hill tiles). 500+ keep 4.5:1 with white text. */
+  --color-emerald-50: #f2f7ec;
+  --color-emerald-100: #e2edd3;
+  --color-emerald-200: #c6dcaa;
+  --color-emerald-300: #a5c67c;
+  --color-emerald-400: #84ad52;
+  --color-emerald-500: #557f2f;
+  --color-emerald-600: #4a7029;
+  --color-emerald-700: #3d5d23;
+  --color-emerald-800: #324b1e;
+  --color-emerald-900: #2a3f1b;
+  --color-emerald-950: #15230b;
+
+  /* Shared radius and shadow for cards. */
+  --shadow-card: 0 1px 2px rgb(20 35 26 / 0.04), 0 8px 24px -12px rgb(20 35 26 / 0.18);
+  --shadow-lift: 0 2px 4px rgb(20 35 26 / 0.06), 0 22px 44px -18px rgb(20 35 26 / 0.32);
 }
 
 * {
@@ -31,17 +78,70 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
 }
 
 img {
   max-width: 100%;
 }
 
+::selection {
+  background: rgb(163 184 108 / 0.45);
+}
+
+/* Tailwind v4 resets buttons to the default cursor. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-cyan-600);
+  outline-offset: 2px;
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+
+  /* Soft sand-to-white wash used behind page headers. */
+  .bg-shore {
+    background:
+      radial-gradient(1200px 400px at 85% -10%, rgb(43 142 164 / 0.12), transparent 60%),
+      radial-gradient(900px 380px at -10% 0%, rgb(163 184 108 / 0.18), transparent 60%),
+      var(--background);
+  }
+}
+
 .hero-image {
   background-image:
-    linear-gradient(90deg, rgba(8, 47, 73, 0.76), rgba(8, 47, 73, 0.2)),
+    linear-gradient(90deg, rgba(13, 42, 51, 0.76), rgba(13, 42, 51, 0.2)),
     url("https://images.unsplash.com/photo-1506929562872-bb421503ef21?auto=format&fit=crop&w=1800&q=80");
   background-position: center;
   background-size: cover;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

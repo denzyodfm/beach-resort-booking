@@ -1,27 +1,27 @@
-import { requireResortManager } from "@/lib/admin-auth";
-import { createAdminClient, createClientServer, hasSupabaseEnv } from "@/lib/supabase-server";
+import { getSessionUser, requireResortManager } from "@/lib/admin-auth";
+import { errorMessage, execute, hasDatabaseEnv, queryOne, toSetClause } from "@/lib/db";
+import { fetchBookingRow, fetchBookingRows } from "@/lib/record-queries";
 import { getServerDemoBookings, updateServerDemoBooking } from "@/lib/demo-booking-store";
 import { isPaidEnoughToConfirm } from "@/lib/booking-logic";
 import type { Booking, BookingStatus, PaymentLog, PaymentStatus } from "@/lib/types";
 import { expireUnpaidReservations } from "@/lib/reservation-expiry";
+import { readBookingExtras } from "@/lib/booking-row";
+import { isValidPaymentReference, normalizePaymentReference } from "@/lib/booking-settings";
 
 export async function GET() {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
   await expireUnpaidReservations();
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     return Response.json(getServerDemoBookings());
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("bookings")
-    .select("*, rooms(name)")
-    .order("created_at", { ascending: false });
-
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-  return Response.json(data);
+  try {
+    return Response.json(await fetchBookingRows());
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function PATCH(request: Request) {
@@ -39,6 +39,8 @@ export async function PATCH(request: Request) {
     paymentHistory,
     refundAmount,
     refundReason,
+    paymentReference,
+    rejectReference,
   } = await request.json();
   const hasPaymentDetails =
     typeof paymentNote === "string" ||
@@ -49,7 +51,7 @@ export async function PATCH(request: Request) {
     typeof refundAmount === "number" ||
     typeof refundReason === "string";
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     const booking = getServerDemoBookings().find((item) => item.id === id);
     if (!booking) return Response.json({ message: "Booking not found." }, { status: 404 });
 
@@ -76,21 +78,67 @@ export async function PATCH(request: Request) {
   const updates: Record<string, unknown> = {};
   if (paymentStatus) updates.payment_status = paymentStatus;
 
-  const supabase = createAdminClient();
-  let existingSpecialRequests = "";
-  if (status === "confirmed" || hasPaymentDetails) {
-    const { data: booking, error: lookupError } = await supabase
-      .from("bookings")
-      .select("payment_status, special_requests")
-      .eq("id", id)
-      .single();
+  // The guest's reference did not match a real payment: put the booking back to
+  // unpaid so its original payment deadline applies again.
+  if (rejectReference === true) {
+    try {
+      const result = await execute(
+        `update bookings set payment_status = 'unpaid', payment_reference = null
+          where id = ? and payment_status = 'authorized'`,
+        [id],
+      );
+      if (!result.affectedRows) {
+        return Response.json({ message: "This booking has no unverified payment reference." }, { status: 409 });
+      }
+      await expireUnpaidReservations();
+      return Response.json(await fetchBookingRow(id));
+    } catch (error) {
+      return Response.json({ message: errorMessage(error) }, { status: 500 });
+    }
+  }
 
-    if (lookupError) return Response.json({ message: lookupError.message }, { status: 404 });
-    existingSpecialRequests = booking.special_requests || "";
+  let existingSpecialRequests = "";
+  if (status === "confirmed" || hasPaymentDetails || typeof paymentReference === "string") {
+    const booking = await queryOne(
+      "select payment_status, payment_reference, special_requests from bookings where id = ?",
+      [id],
+    );
+
+    if (!booking) return Response.json({ message: "Booking not found." }, { status: 404 });
+    existingSpecialRequests = String(booking.special_requests || "");
 
     const effectivePaymentStatus = (paymentStatus || booking.payment_status) as PaymentStatus;
     if (status === "confirmed" && !isPaidEnoughToConfirm(effectivePaymentStatus)) {
       return Response.json({ message: "Payment must be verified before confirming this booking." }, { status: 409 });
+    }
+
+    // Online bookings are paid online, so a payment is only accepted with the
+    // reference number staff matched against the GCash or bank record.
+    const reference = typeof paymentReference === "string"
+      ? normalizePaymentReference(paymentReference)
+      : String(booking.payment_reference || "");
+    const markingPaid = paymentStatus === "paid" || paymentStatus === "deposit_paid";
+    if (markingPaid && readBookingExtras(booking).channel === "online" && !reference) {
+      return Response.json(
+        { message: "Enter the payment reference number to verify an online booking's payment." },
+        { status: 400 },
+      );
+    }
+    if (typeof paymentReference === "string" && reference) {
+      if (!isValidPaymentReference(reference)) {
+        return Response.json({ message: "Reference numbers are 6 to 40 letters or digits." }, { status: 400 });
+      }
+      const usedElsewhere = await queryOne(
+        "select booking_number from bookings where payment_reference = ? and id <> ? limit 1",
+        [reference, id],
+      );
+      if (usedElsewhere) {
+        return Response.json(
+          { message: `Reference ${reference} is already recorded on booking ${usedElsewhere.booking_number}.` },
+          { status: 409 },
+        );
+      }
+      updates.payment_reference = reference;
     }
   }
 
@@ -118,10 +166,18 @@ export async function PATCH(request: Request) {
     });
   }
 
-  const { data, error } = await supabase.from("bookings").update(updates).eq("id", id).select().single();
+  try {
+    if (Object.keys(updates).length) {
+      const set = toSetClause(updates);
+      await execute(`update bookings set ${set.sql} where id = ?`, [...set.params, id]);
+    }
 
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-  return Response.json(data);
+    const data = await fetchBookingRow(id);
+    if (!data) return Response.json({ message: "Booking not found." }, { status: 404 });
+    return Response.json(data);
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 function parseSpecialRequests(value: string) {
@@ -136,25 +192,13 @@ function parseSpecialRequests(value: string) {
 }
 
 async function getActor() {
-  try {
-    const supabase = await createClientServer();
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) return { name: "Unknown user", role: "staff" };
+  const user = await getSessionUser();
+  if (!user) return { name: "Unknown user", role: "staff" };
 
-    const admin = createAdminClient();
-    const { data: profile } = await admin
-      .from("users")
-      .select("email, full_name, role")
-      .eq("id", data.user.id)
-      .single();
-
-    return {
-      name: profile?.full_name || profile?.email || data.user.email || "Unknown user",
-      role: profile?.role || "staff",
-    };
-  } catch {
-    return { name: "Unknown user", role: "staff" };
-  }
+  return {
+    name: user.fullName || user.email || "Unknown user",
+    role: user.role || "staff",
+  };
 }
 
 function normalizePaymentHistory(value: unknown): PaymentLog[] {

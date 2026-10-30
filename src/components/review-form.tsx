@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Loader2, Send } from "lucide-react";
 import type { Room } from "@/lib/types";
 
 export function ReviewForm({ rooms }: { rooms: Room[] }) {
@@ -98,8 +99,9 @@ export function ReviewForm({ rooms }: { rooms: Room[] }) {
 
       <button
         disabled={saving}
-        className="rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
+        className="inline-flex items-center justify-center gap-2 rounded-full bg-bolihon-green px-5 py-3 text-sm font-semibold text-white transition hover:bg-bolihon-green-dark disabled:cursor-not-allowed disabled:bg-slate-300"
       >
+        {saving ? <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin" /> : <Send aria-hidden="true" className="h-4 w-4 shrink-0" />}
         {saving ? "Submitting..." : "Submit review"}
       </button>
 

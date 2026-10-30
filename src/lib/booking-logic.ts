@@ -2,7 +2,8 @@ import type { Booking, PaymentStatus } from "./types";
 import { nightsBetween } from "./resort-data";
 
 export const cancellationWindowDays = 7;
-export const activeBookingStatuses = ["pending", "confirmed"] as const;
+// A checked-in guest still occupies the cottage.
+export const activeBookingStatuses = ["pending", "confirmed", "checked_in"] as const;
 
 export function dateRangesOverlap(
   firstCheckIn: string,

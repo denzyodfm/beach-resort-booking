@@ -35,7 +35,7 @@ export type Room = {
   available?: boolean;
 };
 
-export type BookingStatus = "pending" | "confirmed" | "cancelled";
+export type BookingStatus = "pending" | "confirmed" | "checked_in" | "cancelled";
 export type PaymentStatus =
   | "unpaid"
   | "authorized"
@@ -45,6 +45,8 @@ export type PaymentStatus =
 
 export type Booking = {
   id: string;
+  /** Guest-facing number, e.g. BK-2C5FA11D. */
+  bookingNumber?: string;
   roomId: string;
   roomName: string;
   guestName: string;
@@ -57,6 +59,22 @@ export type Booking = {
   cottageSubtotal?: number;
   premiumFeeAmount?: number;
   reservationFeeAmount?: number;
+  internetFeeAmount?: number;
+  entranceFeeAmount?: number;
+  /** Regular / children / senior-PWD guests, when the booking recorded them. */
+  party?: { regular: number; child: number; senior: number };
+  entranceRates?: { regular: number; child: number; senior: number };
+  /** "standard" = cottage assigned by the resort, "premium" = guest picked it. */
+  bookingType?: "standard" | "premium";
+  channel?: "online" | "walk_in";
+  /** ISO time after which an unpaid booking is cancelled automatically. */
+  paymentDeadline?: string;
+  /** GCash/bank reference number the guest submitted for verification. */
+  paymentReference?: string;
+  /** Sales invoice number issued at the front desk, e.g. SI-2026-000001. */
+  invoiceNumber?: string;
+  /** ISO time the guest was checked in at the front desk. */
+  checkedInAt?: string;
   status: BookingStatus;
   paymentStatus: PaymentStatus;
   paymentNote?: string;

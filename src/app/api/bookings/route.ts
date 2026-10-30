@@ -1,21 +1,34 @@
-import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
+import { randomUUID } from "node:crypto";
+
+import { errorMessage, execute, hasDatabaseEnv, query, queryOne, toDbValue, transaction } from "@/lib/db";
+import { fetchBookingRow, fetchBookingRows } from "@/lib/record-queries";
 import {
   getServerDemoBookings,
   updateServerDemoBooking,
 } from "@/lib/demo-booking-store";
-import { getRoomById } from "@/lib/resort-data";
+import { getRoomById, nightsBetween } from "@/lib/resort-data";
 import { getRoomCatalog } from "@/lib/rooms-server";
 import {
   buildBookingConfirmationMessage,
-  calculateTotal,
   canGuestCancel,
 } from "@/lib/booking-logic";
+import {
+  formatDeadline,
+  getBookingChannel,
+  getBookingCharges,
+  normalizeParty,
+  partySize,
+  type BookingCharges,
+  type BookingType,
+} from "@/lib/booking-settings";
+import { getBookingSettings } from "@/lib/booking-settings-server";
+import type { Room } from "@/lib/types";
 import { findBlockedBookingDate } from "@/lib/booking-blocked-dates";
 import { getBookingBlockedDates } from "@/lib/booking-blocked-dates-server";
 import { sendBookingConfirmationEmail } from "@/lib/email";
 import { sendBookingConfirmationSms } from "@/lib/sms";
 import { expireUnpaidReservations } from "@/lib/reservation-expiry";
-import { isResortManager } from "@/lib/admin-auth";
+import { getSessionUser, isResortManager } from "@/lib/admin-auth";
 
 /**
  * Availability-only view of a booking. The public date grid needs to know which
@@ -40,54 +53,98 @@ export async function GET() {
   await expireUnpaidReservations();
   const manager = await isResortManager();
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     const demoBookings = getServerDemoBookings();
     return Response.json(
       manager ? demoBookings : demoBookings.map((booking) => toAvailabilityRow(booking as unknown as Record<string, unknown>)),
     );
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("bookings")
-    .select("*, rooms(name, booking_includes)")
-    .order("created_at", { ascending: false });
-
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-
-  return Response.json(
-    manager ? data : (data || []).map((row) => toAvailabilityRow(row as Record<string, unknown>)),
-  );
+  try {
+    const data = await fetchBookingRows();
+    return Response.json(manager ? data : data.map((row) => toAvailabilityRow(row)));
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
   await expireUnpaidReservations();
   const body = (await request.json()) as {
-    roomId: string;
+    /** The chosen cottage (premium and walk-in bookings). */
+    roomId?: string;
+    /** The category to assign a cottage from (standard bookings). */
+    categoryId?: string;
+    bookingType?: BookingType;
+    internetAccess?: boolean;
     guestName: string;
     guestEmail?: string;
     guestPhone: string;
     checkIn: string;
     checkOut: string;
     guests: number;
+    /** Regular / children / senior-PWD counts for the entrance fee; their sum is the guest count. */
+    party?: { regular?: number; child?: number; senior?: number };
     totalPrice: number;
   };
+  const party = normalizeParty(body.party, body.guests);
+  const guests = partySize(party);
 
-  const catalog = await getRoomCatalog();
-  const room = catalog.rooms.find((item) => item.id === body.roomId) || getRoomById(body.roomId);
-  const { nights, subtotal, total: cottageTotal } = room
-    ? calculateTotal(room.pricePerNight, body.checkIn, body.checkOut)
-    : { nights: 0, subtotal: 0, total: 0 };
-  const premiumFee = room?.premiumFeeEnabled ? room.premiumFeeAmount || 0 : 0;
-  const reservationFee = room?.reservationFeeEnabled ? room.reservationFeeAmount || 0 : 0;
-  const total = cottageTotal + premiumFee + reservationFee;
-
-  if (!room || nights < 1 || body.guests < 1 || body.guests > room.maxGuests) {
-    return Response.json({ message: "Review cottage, dates, and guest count." }, { status: 400 });
-  }
+  const manager = await isResortManager();
+  const [catalog, settings] = await Promise.all([getRoomCatalog(), getBookingSettings()]);
+  const bookingType: BookingType = body.bookingType === "standard" ? "standard" : "premium";
+  const internetAccess = Boolean(body.internetAccess) && settings.internetFeeAmount > 0;
+  const days = body.checkIn && body.checkOut ? nightsBetween(body.checkIn, body.checkOut) : 0;
 
   if (!body.guestPhone?.trim()) {
     return Response.json({ message: "Cellphone number is required for booking confirmation." }, { status: 400 });
+  }
+
+  if (days < 1 || !(guests >= 1)) {
+    return Response.json({ message: "Review cottage, dates, and guest count." }, { status: 400 });
+  }
+
+  // Standard bookings may land on any free online cottage in the category whose
+  // price matches what the guest was quoted. Premium and walk-in bookings name
+  // their cottage.
+  let candidates: Room[];
+  if (bookingType === "standard") {
+    candidates = catalog.rooms.filter(
+      (room) =>
+        room.categoryId === body.categoryId &&
+        room.available !== false &&
+        getBookingChannel(room) === "online" &&
+        guests <= room.maxGuests &&
+        getBookingCharges({ room, days, settings, bookingType, internetAccess, party }).total === body.totalPrice,
+    );
+    if (!candidates.length) {
+      return Response.json(
+        { message: "No cottage in this category matches that price and guest count. Refresh the page and try again." },
+        { status: 400 },
+      );
+    }
+  } else {
+    const room =
+      catalog.rooms.find((item) => item.id === body.roomId) || (hasDatabaseEnv() ? undefined : getRoomById(body.roomId || ""));
+    if (!room || room.available === false) {
+      return Response.json({ message: "That cottage is not available for booking." }, { status: 404 });
+    }
+    if (getBookingChannel(room) === "walk_in" && !manager) {
+      return Response.json(
+        { message: `${room.name} is reserved for walk-in guests and cannot be booked online. Please choose an online cottage.` },
+        { status: 403 },
+      );
+    }
+    if (guests > room.maxGuests) {
+      return Response.json({ message: `${room.name} takes at most ${room.maxGuests} guests.` }, { status: 400 });
+    }
+    if (getBookingCharges({ room, days, settings, bookingType, internetAccess, party }).total !== body.totalPrice) {
+      return Response.json(
+        { message: "The submitted total does not match the current rates and fees. Refresh the page and try again." },
+        { status: 400 },
+      );
+    }
+    candidates = [room];
   }
 
   const blockedDate = findBlockedBookingDate(body.checkIn, body.checkOut, await getBookingBlockedDates());
@@ -95,85 +152,120 @@ export async function POST(request: Request) {
     return Response.json({ message: blockedDate.reason }, { status: 409 });
   }
 
-  if (body.totalPrice !== total) {
-    return Response.json({ message: "The submitted total does not match the daily rate and dates." }, { status: 400 });
-  }
-
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     return Response.json({
-      message: "Supabase is not configured on this server, so bookings cannot be saved.",
+      message: "The database is not configured on this server, so bookings cannot be saved.",
     }, { status: 503 });
   }
 
-  const supabase = createAdminClient();
-  const { data: conflicts, error: conflictError } = await supabase
-    .from("bookings")
-    .select("id")
-    .eq("room_id", body.roomId)
-    .in("status", ["pending", "confirmed", "checked_in"])
-    .lte("check_in", body.checkOut)
-    .gte("check_out", body.checkIn)
-    .limit(1);
+  const sessionUser = await getSessionUser();
+  let saved: { row: Record<string, unknown>; room: Room; charges: BookingCharges } | null;
+  try {
+    // MySQL has no exclusion constraint for overlapping stays, so lock the
+    // cottage row first: concurrent bookings for the same cottage queue here
+    // and each one sees the others' inserts before checking for a conflict.
+    saved = await transaction(async (connection) => {
+      for (const room of shuffle(candidates)) {
+        const lockedRoom = await queryOne("select id from rooms where id = ? for update", [room.id], connection);
+        if (!lockedRoom) continue;
 
-  if (conflictError) return Response.json({ message: conflictError.message }, { status: 500 });
-  if (conflicts.length > 0) return Response.json({ message: "Those dates are no longer available." }, { status: 409 });
+        const conflicts = await query(
+          `select id from bookings
+            where room_id = ? and status in ('pending', 'confirmed', 'checked_in')
+              and check_in <= ? and check_out >= ?
+            limit 1`,
+          [room.id, body.checkOut, body.checkIn],
+          connection,
+        );
+        if (conflicts.length > 0) continue;
 
-  const { data, error } = await supabase
-    .from("bookings")
-    .insert({
-      room_id: body.roomId,
-      guest_name: body.guestName,
-      guest_email: body.guestEmail || null,
-      guest_phone: body.guestPhone,
-      check_in: body.checkIn,
-      check_out: body.checkOut,
-      guest_count: body.guests,
-      nightly_rate: room.pricePerNight,
-      subtotal_amount: subtotal,
-      total_amount: total,
-      status: "pending",
-      payment_status: "unpaid",
-    })
-    .select()
-    .single();
+        const channel = getBookingChannel(room);
+        const charges = getBookingCharges({ room, days, settings, bookingType, internetAccess, party });
+        const paymentDeadline = new Date(Date.now() + (room.reservationHoldHours || 24) * 60 * 60 * 1000).toISOString();
+        const id = randomUUID();
+        await execute(
+          `insert into bookings (id, booking_number, user_id, room_id, guest_name, guest_email, guest_phone, check_in, check_out,
+             guest_count, nightly_rate, subtotal_amount, total_amount, status, payment_status, payment_deadline, special_requests)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, ?)`,
+          [
+            id,
+            createBookingNumber(),
+            sessionUser?.role === "guest" ? sessionUser.id : null,
+            room.id,
+            body.guestName,
+            body.guestEmail || null,
+            body.guestPhone,
+            body.checkIn,
+            body.checkOut,
+            guests,
+            room.pricePerNight,
+            charges.cottageFee,
+            charges.total,
+            toDbValue(paymentDeadline),
+            JSON.stringify({
+              channel,
+              bookingType: channel === "online" ? bookingType : undefined,
+              internetAccess,
+              party,
+              charges,
+            }),
+          ],
+          connection,
+        );
 
-  if (error) return Response.json({ message: error.message }, { status: 500 });
+        const row = await queryOne("select * from bookings where id = ?", [id], connection);
+        return row ? { row, room, charges } : null;
+      }
 
-  const email = await sendBookingConfirmationEmail({
-    to: body.guestEmail,
+      throw new BookingError(
+        bookingType === "standard"
+          ? "Every cottage in this category is already booked for those dates. Try another date or category."
+          : "Those dates are no longer available.",
+        409,
+      );
+    });
+  } catch (error) {
+    if (error instanceof BookingError) return Response.json({ message: error.message }, { status: error.status });
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
+
+  if (!saved) return Response.json({ message: "Unable to save booking." }, { status: 500 });
+
+  const { row: data, room, charges } = saved;
+  const bookingNumber = String(data.booking_number || data.id);
+  const paymentDeadline = String(data.payment_deadline);
+  const notification = {
     guestName: body.guestName,
-    bookingId: data.booking_number || data.id,
+    bookingId: bookingNumber,
     cottageName: room.name,
     checkIn: body.checkIn,
     checkOut: body.checkOut,
-    totalAmount: total,
-  });
-  const sms = await sendBookingConfirmationSms({
-    to: body.guestPhone,
-    guestName: body.guestName,
-    bookingId: data.booking_number || data.id,
-    cottageName: room.name,
-    checkIn: body.checkIn,
-    checkOut: body.checkOut,
-    totalAmount: total,
-  });
-  const holdHours = room.reservationHoldHours || 24;
-  const holdExpiresAt = new Date(new Date(data.created_at).getTime() + holdHours * 60 * 60 * 1000).toISOString();
+    totalAmount: charges.total,
+    paymentDeadline,
+  };
+  const email = await sendBookingConfirmationEmail({ to: body.guestEmail, ...notification });
+  const sms = await sendBookingConfirmationSms({ to: body.guestPhone, ...notification });
 
   return Response.json(
     {
       booking: data,
-      holdExpiresAt,
+      bookingNumber,
+      roomName: room.name,
+      channel: getBookingChannel(room),
+      bookingType,
+      charges,
+      paymentDeadline,
+      paymentInstructions: settings.paymentInstructions,
       message: `${buildBookingConfirmationMessage({
-        id: data.booking_number || data.id,
+        id: bookingNumber,
         roomName: room.name,
         guestName: body.guestName,
         guestEmail: body.guestEmail,
         guestPhone: body.guestPhone,
         checkIn: body.checkIn,
         checkOut: body.checkOut,
-        totalPrice: total,
-      })} Payment must be recorded within ${holdHours} hours (before ${holdExpiresAt}); otherwise this reservation will be cancelled automatically. ${email.sent ? `Confirmation email sent to ${body.guestEmail}.` : email.reason} ${
+        totalPrice: charges.total,
+      })} Pay before ${formatDeadline(paymentDeadline)}; otherwise this reservation will be cancelled automatically. ${email.sent ? `Confirmation email sent to ${body.guestEmail}.` : email.reason} ${
         sms.sent ? `Confirmation SMS sent to ${body.guestPhone}.` : sms.reason
       }`,
     },
@@ -193,7 +285,7 @@ export async function PATCH(request: Request) {
     return Response.json({ message: "Unsupported booking action." }, { status: 400 });
   }
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     const booking = getServerDemoBookings().find((item) => item.id === body.id);
     if (!booking) return Response.json({ message: "Booking not found." }, { status: 404 });
 
@@ -214,14 +306,8 @@ export async function PATCH(request: Request) {
     });
   }
 
-  const supabase = createAdminClient();
-  const { data: booking, error: lookupError } = await supabase
-    .from("bookings")
-    .select("id, guest_email, guest_phone, check_in, status")
-    .eq("id", body.id)
-    .single();
-
-  if (lookupError) return Response.json({ message: lookupError.message }, { status: 404 });
+  const booking = await queryOne("select id, booking_number, guest_email, guest_phone, check_in, status from bookings where id = ?", [body.id]);
+  if (!booking) return Response.json({ message: "Booking not found." }, { status: 404 });
 
   // These checks used to be skipped entirely when the caller sent no identifier,
   // so knowing a booking id was enough to cancel someone else's stay. Managers
@@ -245,7 +331,7 @@ export async function PATCH(request: Request) {
     }
   }
 
-  const cancellation = canGuestCancel(booking.check_in);
+  const cancellation = canGuestCancel(String(booking.check_in));
   if (!cancellation.allowed) {
     return Response.json(
       { message: `Cancellation window closed. Free cancellation ended on ${cancellation.cancelBy}.` },
@@ -253,18 +339,38 @@ export async function PATCH(request: Request) {
     );
   }
 
-  const { data, error } = await supabase
-    .from("bookings")
-    .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
-    .eq("id", body.id)
-    .in("status", ["draft", "pending", "confirmed"])
-    .select()
-    .single();
+  const result = await execute(
+    `update bookings set status = 'cancelled', cancelled_at = utc_timestamp(3)
+      where id = ? and status in ('draft', 'pending', 'confirmed')`,
+    [body.id],
+  );
+  if (!result.affectedRows) {
+    return Response.json({ message: "This booking can no longer be cancelled." }, { status: 409 });
+  }
 
-  if (error) return Response.json({ message: error.message }, { status: 500 });
+  const data = await fetchBookingRow(body.id);
 
   return Response.json({
     booking: data,
-    message: `Booking ${body.id} was cancelled. Contact ${booking.guest_phone || booking.guest_email} to confirm cancellation.`,
+    message: `Booking ${booking.booking_number || body.id} was cancelled. Contact ${booking.guest_phone || booking.guest_email} to confirm cancellation.`,
   });
+}
+
+class BookingError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+function shuffle<T>(items: T[]) {
+  const copy = items.slice();
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swap]] = [copy[swap], copy[index]];
+  }
+  return copy;
+}
+
+function createBookingNumber() {
+  return `BK-${randomUUID().slice(0, 8).toUpperCase()}`;
 }

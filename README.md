@@ -1,4 +1,4 @@
-BOLIHON is a modern beach resort cottage booking app built with Next.js, React, Tailwind CSS, TypeScript, and Supabase-ready auth/database APIs.
+BOLIHON is a modern beach resort cottage booking app built with Next.js, React, Tailwind CSS, TypeScript, and MySQL.
 
 ## Features
 
@@ -6,27 +6,36 @@ BOLIHON is a modern beach resort cottage booking app built with Next.js, React, 
 - Cottage listing plus dynamic detail pages for Cottage 1-45, Rock 1-6, RD 1-8, VGP Hall, and Pavillon
 - Rates: Cottage Php700, Rock/RD Php800, VGP Hall Php4,500, Pavillon Php3,500
 - Booking form with date, guest, room selection, total price, and availability checks
-- Supabase Auth login and registration
+- Staff and admin sign-in (bcrypt passwords, signed session cookie)
 - Guest dashboard with booking cards
 - Admin dashboard for booking, cottage, image, rate, and payment status management
 - Route handlers for availability, bookings, admin cottages, and admin bookings
-- Supabase schema in `supabase/schema.sql`
+- MySQL schema in `mysql/schema.sql`
 
-## Supabase setup
+## Database setup (MySQL / XAMPP)
 
-1. Create a Supabase project.
-2. Run `supabase/schema.sql` in the SQL editor.
-3. Copy `.env.example` to `.env.local` and fill in:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY`
+1. Start MySQL (for example from the XAMPP control panel).
+2. Create the database and tables: `mysql -u root < mysql/schema.sql`
+   (XAMPP: `C:\xampp\mysql\bin\mysql.exe -u root < mysql/schema.sql`).
+3. Copy `.env.example` to `.env.local` and fill in `DATABASE_URL`, `AUTH_SECRET`, and `NEXT_PUBLIC_PERSISTENT_BACKEND=true`.
+4. Set a staff password: `node --env-file=.env.local scripts/set-password.mjs admin@bolihon.com <password>`.
+   More staff accounts can then be added from Admin > Users & settings.
 
-Without environment variables, the app runs in demo mode with local sample data.
+`scripts/migrate-supabase-to-mysql.mjs` copies data from the old Supabase project (it needs the old Supabase keys in `.env.local`). Passwords cannot be copied, so every account needs a new one.
 
-## Demo login
+Without `DATABASE_URL`, the app runs in demo mode with local sample data.
+
+## User manuals
+
+Manual text lives in `src/lib/manuals.ts` (screenshots in `public/manual/`). Staff and admins read them in Admin > Manual; guests at `/help`. The downloadable PDFs in `manual-pdfs/` are generated from the same text. After editing a manual, start the app and run:
+
+`node scripts/build-manual-pdfs.mjs <admin email> <admin password>`
+
+This needs Microsoft Edge or Google Chrome installed.
+
+## Demo mode
 
 - Guest login: enter a name and cellphone number.
-- Admin login: use admin code `BOLIHON-ADMIN`.
 - Demo chat, pending bookings, and admin replies are stored in browser local storage.
 
 ## Getting Started

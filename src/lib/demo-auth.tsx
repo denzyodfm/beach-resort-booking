@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { createClientBrowser, hasSupabaseEnv } from "@/lib/supabase-browser";
+import { hasPersistentBackend } from "@/lib/backend-mode";
 
 export type DemoRole = "guest" | "staff" | "admin";
 
@@ -16,7 +16,7 @@ export type DemoUser = {
 type AuthContextValue = {
   user: DemoUser | null;
   login: (user: Omit<DemoUser, "id">) => DemoUser;
-  loginWithPassword: (email: string, password: string) => Promise<DemoUser>;
+  loginWithPassword: (identifier: string, password: string) => Promise<DemoUser>;
   logout: () => Promise<void>;
 };
 
@@ -37,17 +37,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (active) setUser(null);
       }
 
-      if (!hasSupabaseEnv()) return;
+      if (!hasPersistentBackend()) return;
 
       try {
-        const supabase = createClientBrowser();
-        const { data } = await supabase.auth.getUser();
-        if (!active || !data.user) return;
+        const response = await fetch("/api/auth/me");
+        const result = (await response.json()) as { user?: DemoUser | null };
+        if (!active || !result.user) return;
 
-        const nextUser = await getSupabaseProfileUser(data.user.id, data.user.email || "");
-        if (active) setUser(nextUser);
+        setUser(toAppUser(result.user));
       } catch {
-        // Demo auth remains available when Supabase session lookup is unavailable.
+        // Demo auth remains available when the session lookup is unavailable.
       }
     }, 0);
 
@@ -74,23 +73,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         window.dispatchEvent(new Event("bolihon-auth-updated"));
         return fullUser;
       },
-      async loginWithPassword(email, password) {
-        const supabase = createClientBrowser();
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
+      async loginWithPassword(identifier, password) {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier, password }),
         });
+        const result = (await response.json()) as { user?: DemoUser; message?: string };
 
-        if (error || !data.user) {
-          throw new Error(error?.message || "Unable to sign in.");
+        if (!response.ok || !result.user) {
+          throw new Error(result.message || "Unable to sign in.");
         }
 
-        const fullUser = await getSupabaseProfileUser(data.user.id, data.user.email || email);
-
-        if (!canManageResort(fullUser.role)) {
-          await supabase.auth.signOut();
-          throw new Error("This Supabase user is not marked as admin or staff.");
-        }
+        const fullUser = toAppUser(result.user);
 
         setUser(fullUser);
         try {
@@ -102,9 +97,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return fullUser;
       },
       async logout() {
-        if (hasSupabaseEnv()) {
+        if (hasPersistentBackend()) {
           try {
-            await createClientBrowser().auth.signOut();
+            await fetch("/api/auth/logout", { method: "POST" });
           } catch {
             // Local state is still cleared below.
           }
@@ -131,22 +126,13 @@ export function useDemoAuth() {
   return context;
 }
 
-async function getSupabaseProfileUser(id: string, fallbackEmail: string): Promise<DemoUser> {
-  const supabase = createClientBrowser();
-  const { data, error } = await supabase
-    .from("users")
-    .select("email, full_name, phone, role")
-    .eq("id", id)
-    .single();
-
-  if (error) throw new Error(error.message);
-
+function toAppUser(user: DemoUser): DemoUser {
   return {
-    id,
-    name: data.full_name || data.email || fallbackEmail || "Supabase user",
-    email: data.email || fallbackEmail,
-    phone: data.phone || "",
-    role: canManageResort(data.role) ? data.role : "guest",
+    id: user.id,
+    name: user.name || user.email || "Staff user",
+    email: user.email,
+    phone: user.phone || "",
+    role: canManageResort(user.role) ? user.role : "guest",
   };
 }
 

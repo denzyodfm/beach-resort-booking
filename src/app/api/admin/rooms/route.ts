@@ -1,90 +1,115 @@
+import { randomUUID } from "node:crypto";
+
+import type { PoolConnection } from "mysql2/promise";
+
 import { requireResortManager } from "@/lib/admin-auth";
-import { createAdminClient, hasSupabaseEnv } from "@/lib/supabase-server";
+import {
+  errorMessage,
+  execute,
+  hasDatabaseEnv,
+  parseJsonArray,
+  queryOne,
+  toInsertClause,
+  toSetClause,
+  transaction,
+} from "@/lib/db";
 import { defaultCategories, normalizeCategory, normalizeRoom, onlineReservablePrefix, premiumFeePrefix, reservationFeePrefix, reservationHoldPrefix, rooms } from "@/lib/resort-data";
+import { fetchCategoryRows, fetchRoomRows } from "@/lib/rooms-server";
 
 export async function GET() {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  if (!hasDatabaseEnv()) {
     return Response.json({ rooms, categories: defaultCategories });
   }
 
-  const supabase = createAdminClient();
-  const [{ data: categoryRows, error: categoryError }, { data: roomRows, error: roomError }] = await Promise.all([
-    supabase.from("room_categories").select("*").order("sort_order"),
-    supabase.from("rooms").select("*, room_images(image_url), room_amenities(amenities(name))").order("sort_order"),
-  ]);
+  try {
+    const [categoryRows, roomRows] = await Promise.all([
+      fetchCategoryRows().catch(() => []),
+      fetchRoomRows({ includeInactive: true }),
+    ]);
 
-  if (roomError) return Response.json({ message: roomError.message }, { status: 500 });
-
-  const categories = !categoryError && categoryRows?.length ? categoryRows.map(normalizeCategory) : defaultCategories;
-  return Response.json({
-    rooms: (roomRows || []).map((room) => normalizeRoom(room, categories)),
-    categories,
-  });
+    const categories = categoryRows.length ? categoryRows.map(normalizeCategory) : defaultCategories;
+    return Response.json({
+      rooms: roomRows.map((room) => normalizeRoom(room, categories)),
+      categories,
+    });
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return Response.json({ message: "Connect Supabase to create rooms." }, { status: 501 });
+  if (!hasDatabaseEnv()) {
+    return Response.json({ message: "Connect the MySQL database to create rooms." }, { status: 501 });
   }
 
-  const supabase = createAdminClient();
-  const body = await request.json();
-  const room = toRoomRow(body);
-  const { image, amenities, ...roomRow } = room;
-  const { data, error } = await saveRoomRow(supabase, "insert", roomRow);
+  const { image, amenities, ...roomRow } = toRoomRow(await request.json());
 
-  if (error) return Response.json({ message: error.message }, { status: 500 });
+  try {
+    const data = await transaction(async (connection) => {
+      const insert = toInsertClause(roomRow);
+      await execute(`insert into rooms (${insert.columns}) values (${insert.placeholders})`, insert.params, connection);
+      await syncRoomAssets(connection, roomRow.id, roomRow.name, image, amenities);
+      return queryOne("select * from rooms where id = ?", [roomRow.id], connection);
+    });
 
-  const assetError = await syncRoomAssets(supabase, data.id, data.name, image, amenities);
-  if (assetError) return Response.json({ message: assetError }, { status: 500 });
-
-  return Response.json(normalizeRoom({ ...data, image, amenities }), { status: 201 });
+    return Response.json(normalizeRoom({ ...fromRoomRow(data), image, amenities }), { status: 201 });
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function PATCH(request: Request) {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return Response.json({ message: "Connect Supabase to update cottages." }, { status: 501 });
+  if (!hasDatabaseEnv()) {
+    return Response.json({ message: "Connect the MySQL database to update cottages." }, { status: 501 });
   }
 
-  const body = await request.json();
-  const { id, image, amenities, ...roomRow } = toRoomRow(body);
-  const supabase = createAdminClient();
+  const { id, image, amenities, ...roomRow } = toRoomRow(await request.json());
 
-  const { data, error } = await saveRoomRow(supabase, "update", roomRow, id);
-  if (error) return Response.json({ message: error.message }, { status: 500 });
+  try {
+    const data = await transaction(async (connection) => {
+      const set = toSetClause(roomRow);
+      await execute(`update rooms set ${set.sql} where id = ?`, [...set.params, id], connection);
+      const row = await queryOne("select * from rooms where id = ?", [id], connection);
+      if (!row) return null;
 
-  const assetError = await syncRoomAssets(supabase, id, data.name, image, amenities);
-  if (assetError) return Response.json({ message: assetError }, { status: 500 });
+      await syncRoomAssets(connection, id, String(row.name), image, amenities);
+      return row;
+    });
 
-  return Response.json(normalizeRoom({ ...data, image, amenities }));
+    if (!data) return Response.json({ message: "Cottage not found." }, { status: 404 });
+    return Response.json(normalizeRoom({ ...fromRoomRow(data), image, amenities }));
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: Request) {
   const auth = await requireResortManager();
   if (!auth.ok) return auth.response;
 
-  if (!hasSupabaseEnv() || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return Response.json({ message: "Connect Supabase to delete cottages." }, { status: 501 });
+  if (!hasDatabaseEnv()) {
+    return Response.json({ message: "Connect the MySQL database to delete cottages." }, { status: 501 });
   }
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   if (!id) return Response.json({ message: "Missing cottage id." }, { status: 400 });
 
-  const supabase = createAdminClient();
-  const { error } = await supabase.from("rooms").delete().eq("id", id);
-
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-  return Response.json({ id });
+  try {
+    await execute("delete from rooms where id = ?", [id]);
+    return Response.json({ id });
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 function slugify(value: string) {
@@ -93,6 +118,10 @@ function slugify(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+function fromRoomRow(row: Record<string, unknown> | null) {
+  return { ...row, booking_includes: parseJsonArray(row?.booking_includes) };
 }
 
 function toRoomRow(body: Record<string, unknown>) {
@@ -139,101 +168,30 @@ function toRoomRow(body: Record<string, unknown>) {
   };
 }
 
-async function saveRoomRow(
-  supabase: ReturnType<typeof createAdminClient>,
-  action: "insert" | "update",
-  roomRow: Record<string, unknown>,
-  id?: string,
-) {
-  let nextRow = { ...roomRow };
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const query =
-      action === "insert"
-        ? supabase.from("rooms").insert(nextRow)
-        : supabase.from("rooms").update(nextRow).eq("id", id || "");
-    const result = await query.select().single();
-
-    if (!result.error || !isMissingSchemaColumnError(result.error.message)) {
-      return result;
-    }
-
-    const stripped = stripMissingRoomColumn(nextRow, result.error.message);
-    if (stripped === nextRow) return result;
-    nextRow = stripped;
-  }
-
-  const query =
-    action === "insert"
-      ? supabase.from("rooms").insert(nextRow)
-      : supabase.from("rooms").update(nextRow).eq("id", id || "");
-  return query.select().single();
-}
-
-function isMissingSchemaColumnError(message: string) {
-  return message.includes("schema cache") && message.includes("column");
-}
-
-function stripMissingRoomColumn(row: Record<string, unknown>, message: string) {
-  const nextRow = { ...row };
-
-  if (message.includes("booking_includes")) {
-    delete nextRow.booking_includes;
-    return nextRow;
-  }
-
-  if (message.includes("category_id")) {
-    delete nextRow.category_id;
-    return nextRow;
-  }
-
-  return row;
-}
-
 async function syncRoomAssets(
-  supabase: ReturnType<typeof createAdminClient>,
+  connection: PoolConnection,
   roomId: string,
   roomName: string,
   image: string,
   amenities: string[],
 ) {
   if (image) {
-    const { error: deleteImageError } = await supabase
-      .from("room_images")
-      .delete()
-      .eq("room_id", roomId)
-      .eq("is_primary", true);
-
-    if (deleteImageError) return deleteImageError.message;
-
-    const { error: imageError } = await supabase.from("room_images").insert({
-      room_id: roomId,
-      image_url: image,
-      alt_text: `${roomName} cottage image`,
-      is_primary: true,
-      sort_order: 10,
-    });
-
-    if (imageError) return imageError.message;
+    await execute("delete from room_images where room_id = ? and is_primary = 1", [roomId], connection);
+    await execute(
+      `insert into room_images (id, room_id, image_url, alt_text, is_primary, sort_order)
+       values (?, ?, ?, ?, 1, 10)`,
+      [randomUUID(), roomId, image, `${roomName} cottage image`],
+      connection,
+    );
   }
 
-  const { error: deleteAmenitiesError } = await supabase.from("room_amenities").delete().eq("room_id", roomId);
-  if (deleteAmenitiesError) return deleteAmenitiesError.message;
+  await execute("delete from room_amenities where room_id = ?", [roomId], connection);
 
   for (const amenity of amenities) {
-    const { data, error } = await supabase
-      .from("amenities")
-      .upsert({ name: amenity }, { onConflict: "name" })
-      .select("id")
-      .single();
-    if (error) return error.message;
+    await execute("insert ignore into amenities (id, name) values (?, ?)", [randomUUID(), amenity], connection);
+    const row = await queryOne("select id from amenities where name = ?", [amenity], connection);
+    if (!row) continue;
 
-    const { error: linkError } = await supabase.from("room_amenities").insert({
-      room_id: roomId,
-      amenity_id: data.id,
-    });
-    if (linkError) return linkError.message;
+    await execute("insert ignore into room_amenities (room_id, amenity_id) values (?, ?)", [roomId, row.id], connection);
   }
-
-  return "";
 }

@@ -6,6 +6,8 @@ const cottageImages: Record<RoomType, string> = {
   rd: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1400&q=80",
   hall: "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=1400&q=80",
   pavillon: "https://images.unsplash.com/photo-1602002418082-a4443e081dd1?auto=format&fit=crop&w=1400&q=80",
+  tent: "https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?auto=format&fit=crop&w=1400&q=80",
+  "beach-chair": "https://images.unsplash.com/photo-1519046904884-53103b34b206?auto=format&fit=crop&w=1400&q=80",
 };
 
 const cottageGallery = [
@@ -61,6 +63,9 @@ export const defaultCategories: CottageCategory[] = [
   { id: "rd", name: "RD cottages", description: "RD 1 to 8 - Php800/day", sortOrder: 30 },
   { id: "hall", name: "VGP Hall", description: "Event cottage - Php4,500/day", sortOrder: 40 },
   { id: "pavillon", name: "Pavillon", description: "Open-air cottage - Php3,500/day", sortOrder: 50 },
+  // Accommodation rentals named in the front-desk SOP; empty until units are added in Admin → Cottages.
+  { id: "tent", name: "Tents", description: "Beach tents - set the rate per unit in Admin", sortOrder: 60 },
+  { id: "beach-chair", name: "Beach chairs", description: "Beach chair setups - set the rate per unit in Admin", sortOrder: 70 },
 ];
 
 type NumberedCottageType = "cove" | "rock" | "rd";

@@ -1,44 +1,40 @@
+import { randomUUID } from "node:crypto";
+
 import { requireAdminUser } from "@/lib/admin-auth";
-import { createAdminClient } from "@/lib/supabase-server";
+import { errorMessage, execute, query, toBoolean } from "@/lib/db";
+import { hashPassword } from "@/lib/session";
 
 type UserRole = "guest" | "staff" | "admin";
 
 const validRoles = new Set<UserRole>(["guest", "staff", "admin"]);
-const longBanDuration = "876000h";
 
 export async function GET() {
   const adminCheck = await requireAdminUser();
   if (!adminCheck.ok) return adminCheck.response;
 
-  const supabase = createAdminClient();
-  const [{ data: authData, error: authError }, { data: profiles, error: profilesError }] = await Promise.all([
-    supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-    supabase.from("users").select("id, email, full_name, phone, role, created_at, updated_at").order("created_at", {
-      ascending: false,
-    }),
-  ]);
+  try {
+    const profiles = await query(
+      `select id, email, full_name, phone, role, disabled, last_sign_in_at, created_at, updated_at
+         from users order by created_at desc`,
+    );
 
-  if (authError) return Response.json({ message: authError.message }, { status: 500 });
-  if (profilesError) return Response.json({ message: profilesError.message }, { status: 500 });
-
-  const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
-  const rows = authData.users.map((user) => {
-    const profile = profileById.get(user.id);
-    return {
-      id: user.id,
-      email: user.email || profile?.email || "",
-      fullName: profile?.full_name || String(user.user_metadata?.full_name || ""),
-      phone: profile?.phone || String(user.phone || ""),
-      role: validRoles.has(profile?.role as UserRole) ? profile?.role : "guest",
-      disabled: isDisabled(user.banned_until),
-      emailConfirmed: Boolean(user.email_confirmed_at),
-      lastSignInAt: user.last_sign_in_at || "",
-      createdAt: profile?.created_at || user.created_at || "",
-      updatedAt: profile?.updated_at || user.updated_at || "",
-    };
-  });
-
-  return Response.json(rows);
+    return Response.json(
+      profiles.map((profile) => ({
+        id: String(profile.id),
+        email: String(profile.email || ""),
+        fullName: String(profile.full_name || ""),
+        phone: String(profile.phone || ""),
+        role: validRoles.has(profile.role as UserRole) ? profile.role : "guest",
+        disabled: toBoolean(profile.disabled),
+        emailConfirmed: true,
+        lastSignInAt: String(profile.last_sign_in_at || ""),
+        createdAt: String(profile.created_at || ""),
+        updatedAt: String(profile.updated_at || ""),
+      })),
+    );
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
@@ -57,33 +53,21 @@ export async function POST(request: Request) {
     return Response.json({ message: "Email and password are required." }, { status: 400 });
   }
 
-  const supabase = createAdminClient();
-  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: { full_name: fullName },
-    ban_duration: disabled ? longBanDuration : "none",
-  });
+  const passwordError = validatePassword(password);
+  if (passwordError) return Response.json({ message: passwordError }, { status: 400 });
 
-  if (authError || !authData.user) {
-    return Response.json({ message: authError?.message || "Unable to create user." }, { status: 500 });
+  try {
+    const id = randomUUID();
+    await execute(
+      `insert into users (id, email, full_name, phone, role, password_hash, disabled)
+       values (?, ?, ?, ?, ?, ?, ?)`,
+      [id, email, fullName, phone, role, await hashPassword(password), disabled ? 1 : 0],
+    );
+
+    return Response.json({ id }, { status: 201 });
+  } catch (error) {
+    return Response.json({ message: duplicateEmailMessage(error) }, { status: 500 });
   }
-
-  const { error: profileError } = await supabase.from("users").upsert({
-    id: authData.user.id,
-    email,
-    full_name: fullName,
-    phone,
-    role,
-  });
-
-  if (profileError) {
-    await supabase.auth.admin.deleteUser(authData.user.id);
-    return Response.json({ message: profileError.message }, { status: 500 });
-  }
-
-  return Response.json({ id: authData.user.id }, { status: 201 });
 }
 
 export async function PATCH(request: Request) {
@@ -107,33 +91,31 @@ export async function PATCH(request: Request) {
     return Response.json({ message: "You cannot disable or remove admin access from your own account." }, { status: 409 });
   }
 
-  const supabase = createAdminClient();
-  const authUpdates: {
-    email: string;
-    password?: string;
-    user_metadata: { full_name: string };
-    ban_duration: string;
-  } = {
-    email,
-    user_metadata: { full_name: fullName },
-    ban_duration: disabled ? longBanDuration : "none",
-  };
+  if (password) {
+    const passwordError = validatePassword(password);
+    if (passwordError) return Response.json({ message: passwordError }, { status: 400 });
+  }
 
-  if (password) authUpdates.password = password;
+  try {
+    const result = password
+      ? await execute(
+          "update users set email = ?, full_name = ?, phone = ?, role = ?, disabled = ?, password_hash = ? where id = ?",
+          [email, fullName, phone, role, disabled ? 1 : 0, await hashPassword(password), id],
+        )
+      : await execute("update users set email = ?, full_name = ?, phone = ?, role = ?, disabled = ? where id = ?", [
+          email,
+          fullName,
+          phone,
+          role,
+          disabled ? 1 : 0,
+          id,
+        ]);
 
-  const { error: authError } = await supabase.auth.admin.updateUserById(id, authUpdates);
-  if (authError) return Response.json({ message: authError.message }, { status: 500 });
-
-  const { error: profileError } = await supabase.from("users").upsert({
-    id,
-    email,
-    full_name: fullName,
-    phone,
-    role,
-  });
-
-  if (profileError) return Response.json({ message: profileError.message }, { status: 500 });
-  return Response.json({ ok: true });
+    if (!result.affectedRows) return Response.json({ message: "User not found." }, { status: 404 });
+    return Response.json({ ok: true });
+  } catch (error) {
+    return Response.json({ message: duplicateEmailMessage(error) }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: Request) {
@@ -148,11 +130,12 @@ export async function DELETE(request: Request) {
     return Response.json({ message: "You cannot delete your own admin account." }, { status: 409 });
   }
 
-  const supabase = createAdminClient();
-  const { error } = await supabase.auth.admin.deleteUser(id);
-  if (error) return Response.json({ message: error.message }, { status: 500 });
-
-  return Response.json({ ok: true });
+  try {
+    await execute("delete from users where id = ?", [id]);
+    return Response.json({ ok: true });
+  } catch (error) {
+    return Response.json({ message: errorMessage(error) }, { status: 500 });
+  }
 }
 
 function normalizeEmail(value: unknown) {
@@ -163,8 +146,14 @@ function normalizeRole(value: unknown): UserRole {
   return validRoles.has(value as UserRole) ? (value as UserRole) : "guest";
 }
 
-function isDisabled(bannedUntil: string | null | undefined) {
-  if (!bannedUntil) return false;
-  const timestamp = Date.parse(bannedUntil);
-  return Number.isFinite(timestamp) && timestamp > Date.now();
+/** Supabase enforced a 6-character minimum; keep the same floor. */
+function validatePassword(password: string) {
+  return password.length < 6 ? "Password should be at least 6 characters." : "";
+}
+
+function duplicateEmailMessage(error: unknown) {
+  if (error && typeof error === "object" && (error as { code?: string }).code === "ER_DUP_ENTRY") {
+    return "A user with this email address has already been registered.";
+  }
+  return errorMessage(error);
 }
