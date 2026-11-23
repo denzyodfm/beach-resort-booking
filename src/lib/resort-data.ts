@@ -22,8 +22,16 @@ export const defaultBookingIncludes = [
   "Guest dashboard visibility after sign in",
 ];
 
-export const defaultReservationHoldHours = 24;
-export const reservationHoldPrefix = "__reservation_hold_hours:";
+/** How long an unpaid reservation holds the cottage before it is cancelled automatically. */
+export const defaultReservationHoldMinutes = 30;
+export const minReservationHoldMinutes = 15;
+export const maxReservationHoldMinutes = 30;
+export const reservationHoldPrefix = "__reservation_hold_minutes:";
+/**
+ * The old per-cottage hold in hours. It is no longer honoured (holds are now 15-30 minutes);
+ * it is only recognised so it gets stripped from booking includes.
+ */
+export const legacyReservationHoldPrefix = "__reservation_hold_hours:";
 export const premiumFeePrefix = "__premium_fee:";
 export const reservationFeePrefix = "__reservation_fee:";
 export const onlineReservablePrefix = "__online_reservable:";
@@ -34,11 +42,17 @@ export function getOnlineReservable(values: unknown, defaultValue = true) {
   return marker ? marker.slice(onlineReservablePrefix.length) !== "false" : defaultValue;
 }
 
-export function getReservationHoldHours(values: unknown) {
-  if (!Array.isArray(values)) return defaultReservationHoldHours;
+/** Keeps a hold within 15-30 minutes; anything missing or invalid falls back to the 30-minute default. */
+export function clampReservationHoldMinutes(value: unknown) {
+  const minutes = Math.round(Number(value));
+  if (!Number.isFinite(minutes) || minutes <= 0) return defaultReservationHoldMinutes;
+  return Math.min(maxReservationHoldMinutes, Math.max(minReservationHoldMinutes, minutes));
+}
+
+export function getReservationHoldMinutes(values: unknown) {
+  if (!Array.isArray(values)) return defaultReservationHoldMinutes;
   const marker = values.map(String).find((value) => value.startsWith(reservationHoldPrefix));
-  const hours = Number(marker?.slice(reservationHoldPrefix.length));
-  return Number.isFinite(hours) && hours > 0 ? hours : defaultReservationHoldHours;
+  return clampReservationHoldMinutes(marker?.slice(reservationHoldPrefix.length));
 }
 
 export function getBookingChargeSettings(values: unknown) {
@@ -148,7 +162,7 @@ function createCottage(type: NumberedCottageType, number: number): Room {
     gallery: cottageGallery,
     amenities: detail.amenities,
     bookingIncludes: defaultBookingIncludes,
-    reservationHoldHours: defaultReservationHoldHours,
+    reservationHoldMinutes: defaultReservationHoldMinutes,
     featured: number <= (type === "cove" ? 3 : 1),
     available: true,
   };
@@ -174,7 +188,7 @@ const specialCottages: Room[] = [
     gallery: cottageGallery,
     amenities: ["Event space", "Private bath", "Outdoor seating", "Resort access"],
     bookingIncludes: ["Flexible event setup", "Private bath access", "Guest dashboard visibility after sign in"],
-    reservationHoldHours: defaultReservationHoldHours,
+    reservationHoldMinutes: defaultReservationHoldMinutes,
     featured: true,
     available: true,
   },
@@ -197,7 +211,7 @@ const specialCottages: Room[] = [
     gallery: cottageGallery,
     amenities: ["Open-air space", "Private bath", "Beach access", "Resort access"],
     bookingIncludes: ["Open-air shaded use", "Beach access", "Guest dashboard visibility after sign in"],
-    reservationHoldHours: defaultReservationHoldHours,
+    reservationHoldMinutes: defaultReservationHoldMinutes,
     featured: true,
     available: true,
   },
@@ -264,10 +278,12 @@ export function normalizeRoom(row: Room | Record<string, unknown>, categories = 
       : normalizedAmenities || [],
     bookingIncludes: Array.isArray(includesValue)
       ? includesValue.map(String).filter((value) =>
-          ![reservationHoldPrefix, premiumFeePrefix, reservationFeePrefix, onlineReservablePrefix].some((prefix) => value.startsWith(prefix)),
+          ![reservationHoldPrefix, legacyReservationHoldPrefix, premiumFeePrefix, reservationFeePrefix, onlineReservablePrefix].some((prefix) => value.startsWith(prefix)),
         )
       : defaultBookingIncludes,
-    reservationHoldHours: Number(source.reservationHoldHours) || getReservationHoldHours(includesValue),
+    reservationHoldMinutes: source.reservationHoldMinutes
+      ? clampReservationHoldMinutes(source.reservationHoldMinutes)
+      : getReservationHoldMinutes(includesValue),
     premiumFeeEnabled: source.premiumFeeEnabled === undefined ? chargeSettings.premiumFeeEnabled : Boolean(source.premiumFeeEnabled),
     premiumFeeAmount: Number(source.premiumFeeAmount) || chargeSettings.premiumFeeAmount,
     reservationFeeEnabled: source.reservationFeeEnabled === undefined ? chargeSettings.reservationFeeEnabled : Boolean(source.reservationFeeEnabled),

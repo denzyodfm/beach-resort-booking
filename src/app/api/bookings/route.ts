@@ -6,7 +6,7 @@ import {
   getServerDemoBookings,
   updateServerDemoBooking,
 } from "@/lib/demo-booking-store";
-import { getRoomById, nightsBetween } from "@/lib/resort-data";
+import { clampReservationHoldMinutes, getRoomById, nightsBetween } from "@/lib/resort-data";
 import { getRoomCatalog } from "@/lib/rooms-server";
 import {
   buildBookingConfirmationMessage,
@@ -181,7 +181,7 @@ export async function POST(request: Request) {
 
         const channel = getBookingChannel(room);
         const charges = getBookingCharges({ room, days, settings, bookingType, internetAccess, party });
-        const paymentDeadline = new Date(Date.now() + (room.reservationHoldHours || 24) * 60 * 60 * 1000).toISOString();
+        const paymentDeadline = new Date(Date.now() + clampReservationHoldMinutes(room.reservationHoldMinutes) * 60 * 1000).toISOString();
         const id = randomUUID();
         await execute(
           `insert into bookings (id, booking_number, user_id, room_id, guest_name, guest_email, guest_phone, check_in, check_out,

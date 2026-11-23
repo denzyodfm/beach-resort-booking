@@ -122,9 +122,9 @@ export function InternetAccessOption({
 }
 
 /** Itemised charges with the total, used in both booking forms. */
-export function ChargeBreakdown({ charges, days }: { charges: BookingCharges; days: number }) {
+export function ChargeBreakdown({ charges, days, compact = false }: { charges: BookingCharges; days: number; compact?: boolean }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
+    <div className={`rounded-md border border-slate-200 bg-slate-50 text-sm ${compact ? "px-3 py-2" : "p-4"}`}>
       <div className="flex justify-between gap-4">
         <span>Cottage fee{days > 1 ? ` (${days} days)` : ""}</span>
         <strong>{formatPeso(charges.cottageFee)}</strong>
@@ -149,7 +149,7 @@ export function ChargeBreakdown({ charges, days }: { charges: BookingCharges; da
       {charges.internetFee > 0 ? (
         <div className="mt-2 flex justify-between gap-4"><span>Internet access</span><strong>{formatPeso(charges.internetFee)}</strong></div>
       ) : null}
-      <div className="mt-3 flex justify-between gap-4 border-t border-slate-300 pt-3 text-base">
+      <div className={`flex justify-between gap-4 border-t border-slate-300 text-base ${compact ? "mt-2 pt-2" : "mt-3 pt-3"}`}>
         <strong>Total</strong>
         <strong>{formatPeso(charges.total)}</strong>
       </div>
@@ -158,12 +158,24 @@ export function ChargeBreakdown({ charges, days }: { charges: BookingCharges; da
 }
 
 /** Bold reminder shown on the booking form before the guest submits. */
-export function PayBeforeNotice({ holdHours }: { holdHours: number }) {
+export function PayBeforeNotice({ holdMinutes, compact = false }: { holdMinutes: number; compact?: boolean }) {
+  if (compact) {
+    return (
+      <div className="rounded-xl border-2 border-amber-500 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+        <p className="flex items-center gap-2 text-sm font-black">
+          <AlarmClock aria-hidden="true" className="h-4 w-4 shrink-0" />
+          Pay online within {holdMinutes} minutes of booking
+        </p>
+        <p className="mt-0.5">Unpaid reservations are cancelled automatically when the deadline passes.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl border-2 border-amber-500 bg-amber-50 p-3 text-sm text-amber-950">
       <p className="flex items-center gap-2 font-black">
         <AlarmClock aria-hidden="true" className="h-4 w-4 shrink-0" />
-        Pay online within {holdHours} hours of booking
+        Pay online within {holdMinutes} minutes of booking
       </p>
       <p className="mt-1">
         Next you&apos;ll see where to pay and a box for your payment reference number. Unpaid reservations are cancelled
@@ -220,15 +232,37 @@ export function PartyFields({
   party,
   maxGuests,
   onChange,
+  compact = false,
 }: {
   id: string;
   settings: BookingSettings;
   party: GuestParty;
   maxGuests: number;
   onChange: (party: GuestParty) => void;
+  /** Smaller input with the guest limit in the label, for the booking pop-up. */
+  compact?: boolean;
 }) {
   const total = partySize(party);
   const tooMany = total > maxGuests;
+
+  if (settings.entranceFeeAmount <= 0 && compact) {
+    return (
+      <div>
+        <label htmlFor={id} className="text-sm font-semibold text-slate-700">
+          Guests <span className={`font-normal ${tooMany ? "text-rose-700" : "text-slate-500"}`}>(max {maxGuests})</span>
+        </label>
+        <input
+          id={id}
+          type="number"
+          min={1}
+          max={maxGuests}
+          value={total}
+          onChange={(event) => onChange({ regular: Math.max(0, Number(event.target.value) || 0), child: 0, senior: 0 })}
+          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
+        />
+      </div>
+    );
+  }
 
   if (settings.entranceFeeAmount <= 0) {
     return (

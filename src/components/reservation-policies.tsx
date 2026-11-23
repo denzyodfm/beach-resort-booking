@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { AlarmClock, CreditCard, Globe, type LucideIcon, Star, Ticket, Users, Wifi } from "lucide-react";
 import { formatPeso, type BookingSettings } from "@/lib/booking-settings";
+import { defaultReservationHoldMinutes } from "@/lib/resort-data";
 
 /**
  * The online booking rules, shown at the top of every booking page so guests
  * see the payment deadline and fees before they pick a cottage.
  */
-export function ReservationPolicies({ settings, holdHours = 24 }: { settings: BookingSettings; holdHours?: number }) {
+export function ReservationPolicies({ settings, holdMinutes = defaultReservationHoldMinutes }: { settings: BookingSettings; holdMinutes?: number }) {
   const rules: Array<{ title: string; body: string; tone: string; icon: LucideIcon }> = [
     {
-      title: `Pay within ${holdHours} hours`,
+      title: `Pay within ${holdMinutes} minutes`,
       body: "Your booking shows its exact payment deadline. Unpaid reservations are cancelled automatically after it and the cottage is released.",
       tone: "border-rose-300 bg-rose-50 text-rose-950",
       icon: AlarmClock,

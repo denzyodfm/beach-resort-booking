@@ -25,7 +25,7 @@ export type Room = {
   gallery: string[];
   amenities: string[];
   bookingIncludes: string[];
-  reservationHoldHours: number;
+  reservationHoldMinutes: number;
   premiumFeeEnabled?: boolean;
   premiumFeeAmount?: number;
   reservationFeeEnabled?: boolean;

@@ -1,6 +1,6 @@
 import { DateCottageBooking } from "@/components/booking/date-cottage-booking";
 import { ReservationPolicies } from "@/components/reservation-policies";
-import { getBookingChannel, typicalHoldHours } from "@/lib/booking-settings";
+import { getBookingChannel, typicalHoldMinutes } from "@/lib/booking-settings";
 import { getBookingSettings } from "@/lib/booking-settings-server";
 import { getRoomCatalog } from "@/lib/rooms-server";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function BookingByDatePage() {
   const [{ rooms, categories }, settings] = await Promise.all([getRoomCatalog(), getBookingSettings()]);
   const onlineRooms = rooms.filter((room) => getBookingChannel(room) === "online");
-  const holdHours = typicalHoldHours(onlineRooms);
+  const holdMinutes = typicalHoldMinutes(onlineRooms);
   const resortToday = getResortToday();
 
   return (
@@ -22,7 +22,7 @@ export default async function BookingByDatePage() {
           cottage. Only cottages set aside for online booking are shown here; the rest are kept for walk-in guests.
         </p>
       </div>
-      <ReservationPolicies settings={settings} holdHours={holdHours} />
+      <ReservationPolicies settings={settings} holdMinutes={holdMinutes} />
       <DateCottageBooking rooms={onlineRooms} categories={categories} resortToday={resortToday} settings={settings} />
     </section>
   );

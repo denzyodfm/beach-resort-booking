@@ -41,7 +41,7 @@ const guestManual: Manual = {
       table: {
         headers: ["Rule", "What it means for you"],
         rows: [
-          ["Payment deadline", "Every online booking shows a deadline (usually 24 hours after booking). If the resort has not received your payment reference by then, the booking is cancelled automatically and the cottage is released"],
+          ["Payment deadline", "Every online booking shows a deadline (usually 30 minutes after booking). If the resort has not received your payment reference by then, the booking is cancelled automatically and the cottage is released"],
           ["Online payment only", "Online bookings are paid online by GCash or bank transfer. You then enter the payment reference number so the resort can verify it. Cash is for walk-in guests"],
           ["Online vs walk-in cottages", "Only cottages marked **Online booking** can be booked on the website. Cottages marked **Walk-in only** are kept for guests who come to the resort"],
           ["Reservation fee", "A reservation fee is added once to every online booking"],
@@ -240,7 +240,7 @@ const staffManual: Manual = {
         "Bookings, Payments, Cottages, Reviews and Users & settings each have sub-tabs, for example **Booking approvals**, **Occupancy calendar** and **No-booking dates**. Numbers on a tab show what is waiting.",
         "Drag any tab or sub-tab (grip ⋮⋮ on its left) to put it in the order you prefer, or click it and press **Alt + ←/→**. The admin page opens on your first tab. **Reset order** restores the default. The order is remembered per browser.",
         "A blue **payment references to verify** banner appears on every admin tab when guests have submitted references. Tap it to open the Payments tab.",
-        "A red **unpaid bookings auto-cancel within 6 hours** banner lists bookings close to their payment deadline. Tap it to open the Bookings tab.",
+        "A red **unpaid bookings auto-cancel within 10 minutes** banner lists bookings close to their payment deadline. Tap it to open the Bookings tab.",
       ],
       images: [{ src: "/manual/admin-overview.jpg", alt: "Admin dashboard Overview tab" }],
     },
@@ -287,7 +287,7 @@ const staffManual: Manual = {
         headers: ["Field", "What it does"],
         rows: [
           ["Daily rate / Max guests", "Price per day and the most guests per booking"],
-          ["Reservation hold (hours)", "The payment deadline: how long an unpaid booking is kept before it is cancelled automatically (default 24)"],
+          ["Payment deadline (minutes)", "How long an unpaid booking is kept before it is cancelled automatically: 15, 20, 25 or 30 minutes (default 30)"],
           ["Designated for online reservations", "Ticked: bookable online, labelled Online booking. Unticked: walk-in only, hidden from online booking. Saves immediately"],
           ["Use a different premium charge / reservation fee", "Optional override for this cottage. Unticked: the resort-wide fees from Users & settings apply. Online cottages only"],
           ["Available for booking", "Unticked: the cottage is hidden from guests"],
@@ -399,7 +399,7 @@ const adminManual: Manual = {
       bullets: [
         "New bookings use the new amounts immediately. Existing bookings keep the price they were booked at.",
         "To charge a different reservation or premium fee for one cottage, use the fee override fields in **Admin → Cottages**.",
-        "To change the payment deadline, set **Reservation hold (hours)** on each cottage in **Admin → Cottages**.",
+        "To change the payment deadline, set **Payment deadline (minutes)** on each cottage in **Admin → Cottages**.",
         "To move a cottage between online and walk-in, tick or untick **Designated for online reservations** in **Admin → Cottages**.",
       ],
     },

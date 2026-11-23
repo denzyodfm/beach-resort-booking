@@ -1,12 +1,12 @@
 import "server-only";
 
 import { execute, hasDatabaseEnv, parseJsonArray, query } from "@/lib/db";
-import { getReservationHoldHours } from "@/lib/resort-data";
+import { getReservationHoldMinutes } from "@/lib/resort-data";
 
 /** Deadline for a booking that predates the payment_deadline column: created_at + the cottage's hold. */
 export function computePaymentDeadline(createdAt: unknown, bookingIncludes: unknown) {
-  const holdHours = getReservationHoldHours(parseJsonArray(bookingIncludes));
-  return new Date(new Date(String(createdAt)).getTime() + holdHours * 60 * 60 * 1000).toISOString();
+  const holdMinutes = getReservationHoldMinutes(parseJsonArray(bookingIncludes));
+  return new Date(new Date(String(createdAt)).getTime() + holdMinutes * 60 * 1000).toISOString();
 }
 
 /**

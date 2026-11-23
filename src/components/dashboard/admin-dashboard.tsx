@@ -8,6 +8,7 @@ import {
   Ban,
   BookOpen,
   CalendarDays,
+  CalendarRange,
   CalendarX,
   Camera,
   CameraOff,
@@ -56,7 +57,8 @@ import { DraggableTabs, readTabOrder, TabbedSections, type DraggableTab } from "
 import type { BookingBlockedDate } from "@/lib/booking-blocked-dates";
 import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
 import { useDemoAuth } from "@/lib/demo-auth";
-import { nightsBetween, rooms, sampleBookings } from "@/lib/resort-data";
+import { WeeklySummary } from "./weekly-summary";
+import { clampReservationHoldMinutes, defaultReservationHoldMinutes, nightsBetween, rooms, sampleBookings } from "@/lib/resort-data";
 import { hasPersistentBackend } from "@/lib/backend-mode";
 import type { Booking, BookingStatus, CottageCategory, PaymentLog, PaymentStatus, Review, Room } from "@/lib/types";
 
@@ -100,7 +102,7 @@ type CottageCatalogResponse = {
   categories: CottageCategory[];
 };
 type AdminTab = "overview" | "bookings" | "payments" | "cottages" | "reviews" | "settings" | "manual";
-type BookingsTab = "approvals" | "calendar" | "blocked";
+type BookingsTab = "approvals" | "calendar" | "weekly" | "blocked";
 
 const adminTabOrderKey = "bolihon-admin-tab-order";
 const bookingsTabOrderKey = "bolihon-admin-bookings-tab-order";
@@ -109,7 +111,7 @@ const cottagesTabOrderKey = "bolihon-admin-cottages-tab-order";
 const reviewsTabOrderKey = "bolihon-admin-reviews-tab-order";
 const settingsTabOrderKey = "bolihon-admin-settings-tab-order";
 const adminTabIds: AdminTab[] = ["overview", "bookings", "payments", "cottages", "reviews", "settings", "manual"];
-const bookingsTabIds: BookingsTab[] = ["approvals", "calendar", "blocked"];
+const bookingsTabIds: BookingsTab[] = ["approvals", "calendar", "weekly", "blocked"];
 
 const defaultAmenityOptions = [
   "Air conditioning",
@@ -539,6 +541,7 @@ export function AdminDashboard() {
           sections={[
             { id: "approvals", label: "Booking approvals", icon: ClipboardCheck, badge: pendingCount, content: <BookingQueue bookings={bookings} onAction={updateBooking} /> },
             { id: "calendar", label: "Occupancy calendar", icon: CalendarDays, content: <CalendarView bookings={bookings} /> },
+            { id: "weekly", label: "Weekly summary", icon: CalendarRange, content: <WeeklySummary bookings={bookings} /> },
             { id: "blocked", label: "No-booking dates", icon: CalendarX, content: <HolidayDateManagement /> },
           ]}
         />
@@ -2084,7 +2087,7 @@ function CottageManagement({
       gallery: selected?.gallery || [],
       amenities: [],
       bookingIncludes: ["Guest dashboard visibility after sign in"],
-      reservationHoldHours: 24,
+      reservationHoldMinutes: defaultReservationHoldMinutes,
       premiumFeeEnabled: false,
       premiumFeeAmount: 0,
       reservationFeeEnabled: false,
@@ -2307,12 +2310,23 @@ function CottageManagement({
             value={String(selected.maxGuests)}
             onChange={(value) => updateSelected({ maxGuests: Number(value) || 1 })}
           />
-          <EditField
-            label="Reservation hold (hours)"
-            type="number"
-            value={String(selected.reservationHoldHours || 24)}
-            onChange={(value) => updateSelected({ reservationHoldHours: Math.max(1, Number(value) || 24) })}
-          />
+          <div>
+            <label htmlFor="reservation-hold-minutes" className="text-sm font-semibold text-slate-700">
+              Payment deadline (minutes)
+            </label>
+            <select
+              id="reservation-hold-minutes"
+              value={String(clampReservationHoldMinutes(selected.reservationHoldMinutes))}
+              onChange={(event) => updateSelected({ reservationHoldMinutes: Number(event.target.value) })}
+              className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm outline-none ring-cyan-600 focus:ring-2"
+            >
+              {[15, 20, 25, 30].map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {minutes} minutes
+                </option>
+              ))}
+            </select>
+          </div>
           <label className="flex items-start gap-3 rounded-md border border-cyan-200 bg-cyan-50 px-3 py-3 text-sm font-semibold text-cyan-950">
             <input
               type="checkbox"
@@ -2699,7 +2713,7 @@ function PaymentAlerts({
       booking.status === "pending" &&
       booking.paymentStatus === "unpaid" &&
       booking.paymentDeadline &&
-      new Date(booking.paymentDeadline).getTime() - now < 6 * 60 * 60 * 1000,
+      new Date(booking.paymentDeadline).getTime() - now < 10 * 60 * 1000,
   );
   if (!toVerify.length && !expiringSoon.length) return null;
 
@@ -2728,7 +2742,7 @@ function PaymentAlerts({
           <AlarmClock aria-hidden="true" className="mt-5 h-6 w-6 shrink-0" />
           <span className="block min-w-0">
             <p className="text-xs font-black uppercase tracking-[0.2em] text-rose-100">Payment deadline</p>
-            <p className="mt-1 text-2xl font-black">{expiringSoon.length} unpaid booking{expiringSoon.length === 1 ? "" : "s"} auto-cancel within 6 hours</p>
+            <p className="mt-1 text-2xl font-black">{expiringSoon.length} unpaid booking{expiringSoon.length === 1 ? "" : "s"} auto-cancel within 10 minutes</p>
             <p className="mt-1 text-sm text-rose-50">They are cancelled automatically if no payment reference arrives → Bookings tab</p>
           </span>
         </button>

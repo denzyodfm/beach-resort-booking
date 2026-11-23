@@ -38,14 +38,14 @@ export function useNow(intervalMs = 30_000) {
   return now;
 }
 
-/** Large, high-contrast payment deadline. Turns red in the last 3 hours. */
+/** Large, high-contrast payment deadline. Turns red in the last 5 minutes. */
 export function PaymentDeadlineBanner({ deadline, compact = false }: { deadline?: string; compact?: boolean }) {
   const now = useNow();
   if (!deadline) return null;
 
   const remaining = new Date(deadline).getTime() - now;
   const passed = remaining <= 0;
-  const urgent = remaining < 3 * 60 * 60 * 1000;
+  const urgent = remaining < 5 * 60 * 1000;
   const tone = passed || urgent ? "border-rose-600 bg-rose-600" : "border-amber-500 bg-amber-500";
 
   return (

@@ -20,6 +20,7 @@ import {
 import { canManageResort, useDemoAuth } from "@/lib/demo-auth";
 import { getDemoBookings, saveDemoBooking } from "@/lib/demo-bookings";
 import { hasPersistentBackend } from "@/lib/backend-mode";
+import { clampReservationHoldMinutes } from "@/lib/resort-data";
 import type { Booking, BookingStatus, CottageCategory, PaymentLog, PaymentStatus, Room } from "@/lib/types";
 import {
   BookingTypeChooser,
@@ -500,12 +501,12 @@ export function DateCottageBooking({
     if (!quoteRoom || !charges) return null;
 
     return (
-      <form onSubmit={submitBooking} className="grid gap-4">
+      <form onSubmit={submitBooking} className="grid gap-3">
         {quoteIsOnline ? (
-          <PayBeforeNotice holdHours={quoteRoom.reservationHoldHours || 24} />
+          <PayBeforeNotice compact holdMinutes={clampReservationHoldMinutes(quoteRoom.reservationHoldMinutes)} />
         ) : (
           <p className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
-            Walk-in booking. If payment is not recorded within {quoteRoom.reservationHoldHours || 24} hours, it is cancelled
+            Walk-in booking. If payment is not recorded within {clampReservationHoldMinutes(quoteRoom.reservationHoldMinutes)} minutes, it is cancelled
             automatically.
           </p>
         )}
@@ -516,7 +517,7 @@ export function DateCottageBooking({
             the cottage number right after booking. Want a specific cottage? Switch to <strong>Premium booking</strong>.
           </p>
         ) : null}
-        <ChargeBreakdown charges={charges} days={1} />
+        <ChargeBreakdown compact charges={charges} days={1} />
         <InternetAccessOption id={`${prefix}-internet`} settings={settings} checked={internetAccess} onChange={setInternetAccess} />
         <Field
           id={`${prefix}-guest-name`}
@@ -524,22 +525,25 @@ export function DateCottageBooking({
           value={form.guestName}
           onChange={(guestName) => setForm((current) => ({ ...current, guestName }))}
         />
-        <Field
-          id={`${prefix}-guest-phone`}
-          label="Cellphone no."
-          type="tel"
-          value={form.guestPhone}
-          onChange={(guestPhone) => setForm((current) => ({ ...current, guestPhone }))}
-        />
-        <Field
-          id={`${prefix}-guest-email`}
-          label="Email (optional)"
-          type="email"
-          required={false}
-          value={form.guestEmail}
-          onChange={(guestEmail) => setForm((current) => ({ ...current, guestEmail }))}
-        />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field
+            id={`${prefix}-guest-phone`}
+            label="Cellphone no."
+            type="tel"
+            value={form.guestPhone}
+            onChange={(guestPhone) => setForm((current) => ({ ...current, guestPhone }))}
+          />
+          <Field
+            id={`${prefix}-guest-email`}
+            label="Email (optional)"
+            type="email"
+            required={false}
+            value={form.guestEmail}
+            onChange={(guestEmail) => setForm((current) => ({ ...current, guestEmail }))}
+          />
+        </div>
         <PartyFields
+          compact
           id={`${prefix}-guests`}
           settings={settings}
           party={party}
@@ -705,10 +709,7 @@ export function DateCottageBooking({
                 {/* Header: days */}
                 <div className="sticky top-0 z-20 border-b border-slate-300 bg-white px-2 py-3 shadow-sm">
                   <div className="grid items-center gap-1" style={calendarGridStyle}>
-                    <div className="sticky left-0 z-30 grid grid-cols-[minmax(0,1fr)_auto] gap-4 border-r border-slate-200 bg-white px-3 py-0.5 text-xs font-semibold shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">
-                      <span>{standardMode ? "Category" : "Cottage"}</span>
-                      <span>Rate</span>
-                    </div>
+                    <div className="sticky left-0 z-30 border-r border-slate-200 bg-white px-3 py-0.5 text-xs font-semibold text-slate-500 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">Day</div>
                     {monthDays.map((day) => (
                       <div key={`${day}-number`} className="text-xs text-center text-slate-600" title={day}>
                         {new Date(day).getDate()}
@@ -716,7 +717,7 @@ export function DateCottageBooking({
                     ))}
                   </div>
                   <div className="mt-1 grid items-center gap-1" style={calendarGridStyle}>
-                    <div className="sticky left-0 z-30 border-r border-slate-200 bg-white px-3 py-0.5 text-xs font-semibold text-slate-500 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">Day</div>
+                    <div className="sticky left-0 z-30 border-r border-slate-200 bg-white px-3 py-0.5 text-xs font-semibold shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">{standardMode ? "Category" : "Cottage"}</div>
                     {weekdayLabels.map((label, index) => (
                       <div
                         key={`${monthDays[index]}-weekday`}
@@ -735,7 +736,8 @@ export function DateCottageBooking({
                         Any available cottage
                         <span className="block text-xs font-medium text-slate-500">Number = cottages free</span>
                       </div>
-                      <div className="whitespace-nowrap text-xs font-medium text-slate-500">
+                      <div className="whitespace-nowrap text-right text-xs font-medium text-slate-500">
+                        <span className="block text-[10px] font-semibold text-slate-400">Rate</span>
                         {visibleRooms.length ? `from ${formatPeso(Math.min(...visibleRooms.map((room) => room.pricePerNight)))}` : ""}
                       </div>
                     </div>
@@ -771,7 +773,10 @@ export function DateCottageBooking({
                     <div key={room.id} className="grid items-center gap-2 border-t px-3 py-2" style={calendarGridStyle}>
                       <div className="sticky left-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 self-stretch border-r border-slate-200 bg-white px-3 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.35)]">
                         <div className="text-sm font-semibold leading-snug text-slate-900">{room.name}</div>
-                        <div className="whitespace-nowrap text-xs font-medium text-slate-500">{formatPeso(room.pricePerNight)}</div>
+                        <div className="whitespace-nowrap text-right text-xs font-medium text-slate-500">
+                          <span className="block text-[10px] font-semibold text-slate-400">Rate</span>
+                          {formatPeso(room.pricePerNight)}
+                        </div>
                       </div>
                       {monthDays.map((day) => {
                         const blocked = findBlockedBookingDate(day, day, blockedDates);
@@ -861,7 +866,7 @@ export function DateCottageBooking({
               }}
             >
               {dialogTitle ? (
-                <div className="p-6">
+                <div className="p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">{dialogEyebrow}</p>
@@ -875,7 +880,7 @@ export function DateCottageBooking({
                       Close
                     </button>
                   </div>
-                  <div className="mt-5">
+                  <div className="mt-4">
                     {confirmation ? (
                       <BookingPaymentPanel booking={confirmation} guestPhone={form.guestPhone} onUpdated={setConfirmation} />
                     ) : selectedExistingBooking ? (
@@ -962,7 +967,7 @@ function Field({
         required={required}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 w-full rounded-md border border-slate-300 px-3 py-3 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
+        className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-slate-950 outline-none ring-cyan-600 focus:ring-2"
       />
     </div>
   );

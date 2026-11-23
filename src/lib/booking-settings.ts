@@ -1,4 +1,5 @@
 import type { PaymentStatus, Room } from "./types";
+import { clampReservationHoldMinutes, defaultReservationHoldMinutes } from "./resort-data";
 
 /**
  * Resort-wide online booking rules, stored in resort_settings and edited in
@@ -97,13 +98,13 @@ export function getBookingChannel(room: Pick<Room, "onlineReservable">): Booking
 }
 
 /** The payment hold most online cottages use, for the rules banner. Cottages can differ. */
-export function typicalHoldHours(rooms: Room[]) {
+export function typicalHoldMinutes(rooms: Room[]) {
   const counts = new Map<number, number>();
   for (const room of rooms) {
-    const hours = room.reservationHoldHours || 24;
-    counts.set(hours, (counts.get(hours) || 0) + 1);
+    const minutes = clampReservationHoldMinutes(room.reservationHoldMinutes);
+    counts.set(minutes, (counts.get(minutes) || 0) + 1);
   }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? 24;
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? defaultReservationHoldMinutes;
 }
 
 export function getReservationFee(room: Room, settings: BookingSettings) {

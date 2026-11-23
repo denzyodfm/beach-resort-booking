@@ -13,7 +13,7 @@ import {
   toSetClause,
   transaction,
 } from "@/lib/db";
-import { defaultCategories, normalizeCategory, normalizeRoom, onlineReservablePrefix, premiumFeePrefix, reservationFeePrefix, reservationHoldPrefix, rooms } from "@/lib/resort-data";
+import { defaultCategories, normalizeCategory, normalizeRoom, onlineReservablePrefix, premiumFeePrefix, reservationFeePrefix, reservationHoldPrefix, legacyReservationHoldPrefix, clampReservationHoldMinutes, rooms } from "@/lib/resort-data";
 import { fetchCategoryRows, fetchRoomRows } from "@/lib/rooms-server";
 
 export async function GET() {
@@ -132,7 +132,7 @@ function toRoomRow(body: Record<string, unknown>) {
   const rawIncludes = body.bookingIncludes || body.booking_includes;
   const bookingIncludes = Array.isArray(rawIncludes)
     ? rawIncludes.map(String).filter((value) =>
-        ![reservationHoldPrefix, premiumFeePrefix, reservationFeePrefix, onlineReservablePrefix].some((prefix) => value.startsWith(prefix)),
+        ![reservationHoldPrefix, legacyReservationHoldPrefix, premiumFeePrefix, reservationFeePrefix, onlineReservablePrefix].some((prefix) => value.startsWith(prefix)),
       )
     : [];
 
@@ -154,7 +154,7 @@ function toRoomRow(body: Record<string, unknown>) {
     sort_order: Number(body.sortOrder ?? body.sort_order ?? 0),
     booking_includes: [
       ...bookingIncludes,
-      `${reservationHoldPrefix}${Math.max(1, Number(body.reservationHoldHours) || 24)}`,
+      `${reservationHoldPrefix}${clampReservationHoldMinutes(body.reservationHoldMinutes)}`,
       `${onlineReservablePrefix}${body.onlineReservable !== false}`,
       ...(body.onlineReservable !== false && Boolean(body.premiumFeeEnabled) && Number(body.premiumFeeAmount) > 0
         ? [`${premiumFeePrefix}${Number(body.premiumFeeAmount)}`]

@@ -15,7 +15,7 @@ import {
 import { saveDemoBooking } from "@/lib/demo-bookings";
 import { getDemoBookings } from "@/lib/demo-bookings";
 import type { Booking, CottageCategory, Room } from "@/lib/types";
-import { nightsBetween } from "@/lib/resort-data";
+import { clampReservationHoldMinutes, nightsBetween } from "@/lib/resort-data";
 import { hasPersistentBackend } from "@/lib/backend-mode";
 import {
   BookingTypeChooser,
@@ -414,7 +414,7 @@ export function BookingForm({
         </div>
       </div>
 
-      <PayBeforeNotice holdHours={quoteRoom?.reservationHoldHours || 24} />
+      <PayBeforeNotice holdMinutes={clampReservationHoldMinutes(quoteRoom?.reservationHoldMinutes)} />
 
       {!standardMode ? (
         <div className="rounded-md border border-cyan-100 bg-cyan-50 p-4">
