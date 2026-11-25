@@ -57,7 +57,7 @@ import { DraggableTabs, readTabOrder, TabbedSections, type DraggableTab } from "
 import type { BookingBlockedDate } from "@/lib/booking-blocked-dates";
 import { getDemoBookings, updateDemoBooking } from "@/lib/demo-bookings";
 import { useDemoAuth } from "@/lib/demo-auth";
-import { WeeklySummary } from "./weekly-summary";
+import { BookingSummary } from "./booking-summary";
 import { clampReservationHoldMinutes, defaultReservationHoldMinutes, nightsBetween, rooms, sampleBookings } from "@/lib/resort-data";
 import { hasPersistentBackend } from "@/lib/backend-mode";
 import type { Booking, BookingStatus, CottageCategory, PaymentLog, PaymentStatus, Review, Room } from "@/lib/types";
@@ -102,7 +102,7 @@ type CottageCatalogResponse = {
   categories: CottageCategory[];
 };
 type AdminTab = "overview" | "bookings" | "payments" | "cottages" | "reviews" | "settings" | "manual";
-type BookingsTab = "approvals" | "calendar" | "weekly" | "blocked";
+type BookingsTab = "approvals" | "calendar" | "summary" | "blocked";
 
 const adminTabOrderKey = "bolihon-admin-tab-order";
 const bookingsTabOrderKey = "bolihon-admin-bookings-tab-order";
@@ -111,7 +111,7 @@ const cottagesTabOrderKey = "bolihon-admin-cottages-tab-order";
 const reviewsTabOrderKey = "bolihon-admin-reviews-tab-order";
 const settingsTabOrderKey = "bolihon-admin-settings-tab-order";
 const adminTabIds: AdminTab[] = ["overview", "bookings", "payments", "cottages", "reviews", "settings", "manual"];
-const bookingsTabIds: BookingsTab[] = ["approvals", "calendar", "weekly", "blocked"];
+const bookingsTabIds: BookingsTab[] = ["approvals", "calendar", "summary", "blocked"];
 
 const defaultAmenityOptions = [
   "Air conditioning",
@@ -541,7 +541,7 @@ export function AdminDashboard() {
           sections={[
             { id: "approvals", label: "Booking approvals", icon: ClipboardCheck, badge: pendingCount, content: <BookingQueue bookings={bookings} onAction={updateBooking} /> },
             { id: "calendar", label: "Occupancy calendar", icon: CalendarDays, content: <CalendarView bookings={bookings} /> },
-            { id: "weekly", label: "Weekly summary", icon: CalendarRange, content: <WeeklySummary bookings={bookings} /> },
+            { id: "summary", label: "Booking summary", icon: CalendarRange, content: <BookingSummary bookings={bookings} /> },
             { id: "blocked", label: "No-booking dates", icon: CalendarX, content: <HolidayDateManagement /> },
           ]}
         />
